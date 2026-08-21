@@ -29,7 +29,7 @@ Mods::Mods() {
 
     // IntegrityCheckBypass: only for games with anti-tamper (REENGINE_AT)
     if (sdk::GameIdentity::get().is_reengine_at()) {
-        m_mods.emplace_back(IntegrityCheckBypass::get_shared_instance());
+        // TEST: IntegrityCheckBypass disabled for MHS3 Linux diagnostic
     }
 
 #ifndef BAREBONES

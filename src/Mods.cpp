@@ -24,7 +24,7 @@
 #include "Mods.hpp"
 
 Mods::Mods() {
-    m_mods.emplace_back(BackBufferRenderer::get());
+    // TEST: BackBufferRenderer disabled for MHS3 Linux diagnostic
     m_mods.emplace_back(REFrameworkConfig::get());
 
     // IntegrityCheckBypass: only for games with anti-tamper (REENGINE_AT)

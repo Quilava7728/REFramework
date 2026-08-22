@@ -1,3 +1,4 @@
+#define BAREBONES 1
 #include <spdlog/spdlog.h>
 
 #include <sdk/GameIdentity.hpp>

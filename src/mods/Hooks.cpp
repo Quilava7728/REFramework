@@ -10,6 +10,7 @@
 #include "sdk/Application.hpp"
 
 #include "Hooks.hpp"
+#include "ScriptRunner.hpp"
 
 Hooks* g_hook = nullptr;
 
@@ -408,8 +409,12 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         return;
     }
 
-    // MHS3 diagnostic: pure passthrough.
-    // Intercept BeginRendering, but perform NO REFramework frame work.
+    // MHS3 diagnostic: run ONLY the Lua/ScriptRunner heartbeat.
+    // Do not run the full ImGui/REFramework frame pipeline.
+    if (g_framework->is_game_data_initialized()) {
+        ScriptRunner::get()->on_frame();
+    }
+
     m_begin_rendering_original(entry);
 }
 

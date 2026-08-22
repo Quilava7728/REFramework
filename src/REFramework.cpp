@@ -1075,11 +1075,20 @@ void REFramework::on_frame_d3d12() {
             do_per_frame_thing();
             // hooks don't run until after initialization, so we just render the imgui window while initalizing.
             run_imgui_frame(true);
-        } else {   
-            return;
+        } else {
+            // MHS3 diagnostic: generate UI frames from the Present thread.
+            // from_present=true prevents ScriptRunner/game callbacks from running here.
+            do_per_frame_thing();
+            run_imgui_frame(true);
         }
     } else {
         do_per_frame_thing();
+
+        if (is_init_ok) {
+            // MHS3 diagnostic: refresh ImGui/UI only.
+            // ScriptRunner is driven separately from BeginRendering.
+            run_imgui_frame(true);
+        }
     }
 
     if (is_init_ok) {

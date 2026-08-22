@@ -74,6 +74,8 @@ Mods::Mods() {
 
 #endif
 
+    // TEST: restore MethodDatabase on top of BAREBONES
+    m_mods.emplace_back(MethodDatabase::get());
 #ifdef DEVELOPER
     auto dev_tools = std::make_shared<DeveloperTools>();
     m_mods.emplace_back(dev_tools);

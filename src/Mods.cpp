@@ -74,6 +74,9 @@ Mods::Mods() {
 
 #endif
 
+    // MHS3 diagnostic: reduced Hooks module, BeginRendering only.
+    m_mods.emplace_back(Hooks::get());
+
 #ifdef DEVELOPER
     auto dev_tools = std::make_shared<DeveloperTools>();
     m_mods.emplace_back(dev_tools);

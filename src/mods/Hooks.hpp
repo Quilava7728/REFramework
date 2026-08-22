@@ -104,6 +104,9 @@ protected:
     static Matrix4x4f* camera_get_view_matrix_hook(REManagedObject* camera, Matrix4x4f* result);
 
 private:
+    // MHS3 diagnostic: install ONLY the BeginRendering application entry.
+    std::optional<std::string> hook_begin_rendering_only();
+
     std::optional<std::string> hook_update_transform();
     std::optional<std::string> hook_update_camera_controller();
     std::optional<std::string> hook_update_camera_controller2();
@@ -138,22 +141,15 @@ private:
     #define HOOK_LAMBDA(func) [&]() -> std::optional<std::string> { return this->func(); }
 
     std::vector<std::function<std::optional<std::string>()>> m_hook_list{
-        HOOK_LAMBDA(hook_all_application_entries),
-        HOOK_LAMBDA(hook_render_layers),
-        HOOK_LAMBDA(hook_update_transform),
-        HOOK_LAMBDA(hook_update_camera_controller),
-        HOOK_LAMBDA(hook_update_camera_controller2),
-        HOOK_LAMBDA(hook_gui_draw),
-#if defined(REFRAMEWORK_UNIVERSAL) || (!defined(RE7) && !defined(MHRISE))
-        HOOK_LAMBDA(hook_update_before_lock_scene),
-        HOOK_LAMBDA(hook_lightshaft_draw),
-#endif
-        HOOK_LAMBDA(hook_view_get_size),
-        HOOK_LAMBDA(hook_camera_get_projection_matrix),
-        HOOK_LAMBDA(hook_camera_get_view_matrix),
+        // MHS3 diagnostic: do not hook every application entry.
+        // ScriptRunner only needs the BeginRendering heartbeat for this test.
+        HOOK_LAMBDA(hook_begin_rendering_only),
     };
 
 protected:
+    // Original MHS3 BeginRendering function pointer.
+    void (*m_begin_rendering_original)(void*){nullptr};
+
     std::unique_ptr<FunctionHook> m_update_transform_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller2_hook;

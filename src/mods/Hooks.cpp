@@ -375,6 +375,56 @@ std::optional<std::string> Hooks::hook_application_entry(std::string name, std::
     return std::nullopt;
 }
 
+// MHS3 diagnostic:
+// Hook ONLY via.Application::BeginRendering instead of replacing every
+// application-entry function pointer.
+std::optional<std::string> Hooks::hook_begin_rendering_only() {
+    auto application = sdk::Application::get();
+
+    if (application == nullptr) {
+        return "Failed to get via.Application";
+    }
+
+    auto entry = application->get_function("BeginRendering");
+
+    if (entry == nullptr) {
+        return "Unable to find via::Application::BeginRendering";
+    }
+
+    if (entry->func == nullptr) {
+        return "via::Application::BeginRendering is null";
+    }
+
+    m_begin_rendering_original = entry->func;
+    entry->func = &begin_rendering_hook;
+
+    spdlog::info("[Hooks] MHS3 diagnostic: hooked ONLY via.Application::BeginRendering");
+
+    return std::nullopt;
+}
+
+void Hooks::begin_rendering_hook_internal(void* entry) {
+    if (m_begin_rendering_original == nullptr) {
+        return;
+    }
+
+    // During early initialization, preserve normal game behavior.
+    if (!g_framework->is_game_data_initialized()) {
+        m_begin_rendering_original(entry);
+        return;
+    }
+
+    // This is the heartbeat ScriptRunner needs.
+    g_framework->run_imgui_frame(false);
+
+    // Never swallow the game's real BeginRendering call.
+    m_begin_rendering_original(entry);
+}
+
+void Hooks::begin_rendering_hook(void* entry) {
+    g_hook->begin_rendering_hook_internal(entry);
+}
+
 std::optional<std::string> Hooks::hook_all_application_entries() {
     spdlog::info("[Hooks] Attempting to application entries...");
 

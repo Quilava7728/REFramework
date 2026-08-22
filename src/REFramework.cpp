@@ -850,6 +850,8 @@ REFramework::~REFramework() {
 }
 
 void REFramework::run_imgui_frame(bool from_present) {
+    const auto mhs3_ekg_start = std::chrono::steady_clock::now();
+
     std::scoped_lock _{ m_imgui_mtx };
 
     m_has_frame = false;
@@ -901,6 +903,50 @@ void REFramework::run_imgui_frame(bool from_present) {
     if (!from_present && m_wants_save_config) {
         save_config();
         m_wants_save_config = false;
+    }
+
+    // MHS3 Build #10 instrumentation.
+    static uint64_t present_frame_count = 0;
+    static uint64_t present_frame_total_us = 0;
+    static uint64_t present_frame_max_us = 0;
+    static auto present_last_report = std::chrono::steady_clock::now();
+
+    if (from_present) {
+        const auto elapsed_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - mhs3_ekg_start
+        ).count();
+
+        ++present_frame_count;
+        present_frame_total_us += elapsed_us;
+        present_frame_max_us = std::max(present_frame_max_us, elapsed_us);
+
+        if (elapsed_us >= 50000) {
+            spdlog::warn(
+                "[MHS3 EKG] Slow run_imgui_frame(true): {} us ({:.2f} ms)",
+                elapsed_us,
+                elapsed_us / 1000.0
+            );
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+
+        if (now - present_last_report >= std::chrono::seconds(5)) {
+            const double avg_us = present_frame_count > 0
+                ? (double)present_frame_total_us / (double)present_frame_count
+                : 0.0;
+
+            spdlog::info(
+                "[MHS3 EKG] Present UI frames={} avg={:.2f} us max={} us",
+                present_frame_count,
+                avg_us,
+                present_frame_max_us
+            );
+
+            present_frame_count = 0;
+            present_frame_total_us = 0;
+            present_frame_max_us = 0;
+            present_last_report = now;
+        }
     }
 }
 
@@ -1011,6 +1057,19 @@ void REFramework::on_post_present_d3d11() {
 // D3D12 Draw funciton
 void REFramework::on_frame_d3d12() {
     std::scoped_lock _{ m_imgui_mtx };
+
+    // MHS3 Build #10 instrumentation: raw D3D12 Present heartbeat.
+    static uint64_t present_count = 0;
+    static auto present_last_report = std::chrono::steady_clock::now();
+
+    ++present_count;
+
+    const auto present_now = std::chrono::steady_clock::now();
+    if (present_now - present_last_report >= std::chrono::seconds(5)) {
+        spdlog::info("[MHS3 EKG] D3D12 Present={}", present_count);
+        present_count = 0;
+        present_last_report = present_now;
+    }
 
     m_renderer_type = RendererType::D3D12;
 

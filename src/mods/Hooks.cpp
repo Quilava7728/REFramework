@@ -409,10 +409,59 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         return;
     }
 
+    // MHS3 Build #10 instrumentation.
+    static uint64_t begin_rendering_count = 0;
+    static uint64_t script_runner_count = 0;
+    static uint64_t script_runner_total_us = 0;
+    static uint64_t script_runner_max_us = 0;
+    static auto last_report = std::chrono::steady_clock::now();
+
+    ++begin_rendering_count;
+
     // MHS3 diagnostic: run ONLY the Lua/ScriptRunner heartbeat.
     // Do not run the full ImGui/REFramework frame pipeline.
     if (g_framework->is_game_data_initialized()) {
+        const auto start = std::chrono::steady_clock::now();
+
         ScriptRunner::get()->on_frame();
+
+        const auto elapsed_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start
+        ).count();
+
+        ++script_runner_count;
+        script_runner_total_us += elapsed_us;
+        script_runner_max_us = std::max(script_runner_max_us, elapsed_us);
+
+        if (elapsed_us >= 50000) {
+            spdlog::warn(
+                "[MHS3 EKG] Slow ScriptRunner::on_frame(): {} us ({:.2f} ms)",
+                elapsed_us,
+                elapsed_us / 1000.0
+            );
+        }
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now - last_report >= std::chrono::seconds(5)) {
+        const double avg_us = script_runner_count > 0
+            ? (double)script_runner_total_us / (double)script_runner_count
+            : 0.0;
+
+        spdlog::info(
+            "[MHS3 EKG] BeginRendering={} ScriptRunner={} avg={:.2f} us max={} us",
+            begin_rendering_count,
+            script_runner_count,
+            avg_us,
+            script_runner_max_us
+        );
+
+        begin_rendering_count = 0;
+        script_runner_count = 0;
+        script_runner_total_us = 0;
+        script_runner_max_us = 0;
+        last_report = now;
     }
 
     m_begin_rendering_original(entry);

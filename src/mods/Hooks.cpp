@@ -408,16 +408,8 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         return;
     }
 
-    // During early initialization, preserve normal game behavior.
-    if (!g_framework->is_game_data_initialized()) {
-        m_begin_rendering_original(entry);
-        return;
-    }
-
-    // This is the heartbeat ScriptRunner needs.
-    g_framework->run_imgui_frame(false);
-
-    // Never swallow the game's real BeginRendering call.
+    // MHS3 diagnostic: pure passthrough.
+    // Intercept BeginRendering, but perform NO REFramework frame work.
     m_begin_rendering_original(entry);
 }
 

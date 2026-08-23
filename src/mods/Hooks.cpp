@@ -778,8 +778,8 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     }
 
     spdlog::info(
-        "[MHS3 WAIT EKG] WaitRendering probes + runtime SetEvent hook installed at {:p}",
-        setevent
+        "[MHS3 WAIT EKG] WaitRendering probes + runtime SetEvent hook installed at 0x{:x}",
+        (uintptr_t)setevent
     );
 
     return std::nullopt;

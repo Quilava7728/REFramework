@@ -589,6 +589,11 @@ struct MHS3WaitCallsiteStats {
 thread_local std::chrono::steady_clock::time_point g_mhs3_wait_a_start{};
 thread_local std::chrono::steady_clock::time_point g_mhs3_wait_b_start{};
 
+std::atomic<uintptr_t> g_mhs3_wait_a_handle{0};
+std::atomic<uint64_t> g_mhs3_wait_a_epoch{0};
+std::atomic<uint64_t> g_mhs3_wait_a_signal_epoch{0};
+std::atomic<uint64_t> g_mhs3_wait_a_signal_us{0};
+
 MHS3WaitCallsiteStats g_mhs3_wait_a_stats{};
 MHS3WaitCallsiteStats g_mhs3_wait_b_stats{};
 
@@ -734,23 +739,118 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         return "Failed to install MHS3 WaitRendering WaitB-after probe";
     }
 
-    spdlog::info("[MHS3 WAIT EKG] WaitRendering callsite probes installed");
+    // Build #17:
+    // Probe the imported SetEvent thunk itself. At entry, RCX is the HANDLE.
+    // We ignore every event except the exact runtime WaitA handle captured
+    // immediately before WaitForSingleObject.
+    constexpr uintptr_t setevent_thunk_rva = 0x90c3a;
+
+    const auto setevent_thunk = base + setevent_thunk_rva;
+
+    m_mhs3_setevent_probe_hook =
+        safetyhook::create_mid((void*)setevent_thunk, &Hooks::mhs3_setevent_probe);
+
+    if (!m_mhs3_setevent_probe_hook) {
+        return "Failed to install MHS3 WaitA SetEvent probe";
+    }
+
+    spdlog::info(
+        "[MHS3 WAIT EKG] WaitRendering callsite probes + SetEvent probe installed at {:x}",
+        setevent_thunk
+    );
 
     return std::nullopt;
 }
 
 void Hooks::mhs3_wait_a_before(safetyhook::Context& context) {
-    (void)context;
-    g_mhs3_wait_a_start = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+
+    g_mhs3_wait_a_start = now;
+
+    // At this exact callsite, RCX is the HANDLE passed to
+    // WaitForSingleObject(WaitA, INFINITE).
+    g_mhs3_wait_a_handle.store((uintptr_t)context.rcx, std::memory_order_release);
+
+    const auto epoch =
+        g_mhs3_wait_a_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+    g_mhs3_wait_a_signal_epoch.store(0, std::memory_order_release);
+    g_mhs3_wait_a_signal_us.store(0, std::memory_order_release);
+
+    (void)epoch;
+}
+
+void Hooks::mhs3_setevent_probe(safetyhook::Context& context) {
+    const auto wait_a_handle =
+        g_mhs3_wait_a_handle.load(std::memory_order_acquire);
+
+    if (wait_a_handle == 0 || (uintptr_t)context.rcx != wait_a_handle) {
+        return;
+    }
+
+    const auto epoch =
+        g_mhs3_wait_a_epoch.load(std::memory_order_acquire);
+
+    if (epoch == 0 || g_mhs3_wait_a_start.time_since_epoch().count() == 0) {
+        return;
+    }
+
+    const auto signal_us =
+        (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - g_mhs3_wait_a_start
+        ).count();
+
+    g_mhs3_wait_a_signal_us.store(signal_us, std::memory_order_release);
+    g_mhs3_wait_a_signal_epoch.store(epoch, std::memory_order_release);
 }
 
 void Hooks::mhs3_wait_a_after(safetyhook::Context& context) {
     (void)context;
 
+    if (g_mhs3_wait_a_start.time_since_epoch().count() == 0) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    const auto total_us =
+        (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            now - g_mhs3_wait_a_start
+        ).count();
+
     record_mhs3_wait_duration(
         g_mhs3_wait_a_stats,
         g_mhs3_wait_a_start
     );
+
+    const auto epoch =
+        g_mhs3_wait_a_epoch.load(std::memory_order_acquire);
+
+    const auto signal_epoch =
+        g_mhs3_wait_a_signal_epoch.load(std::memory_order_acquire);
+
+    const auto signal_us =
+        g_mhs3_wait_a_signal_us.load(std::memory_order_acquire);
+
+    if (total_us >= 50000) {
+        if (signal_epoch == epoch && signal_us <= total_us) {
+            const auto wake_after_signal_us = total_us - signal_us;
+
+            spdlog::warn(
+                "[MHS3 WAITA SIGNAL] total={} us wait_to_signal={} us signal_to_wake={} us handle=0x{:x}",
+                total_us,
+                signal_us,
+                wake_after_signal_us,
+                g_mhs3_wait_a_handle.load(std::memory_order_acquire)
+            );
+        } else {
+            spdlog::warn(
+                "[MHS3 WAITA SIGNAL] total={} us NO_MATCHING_SETEVENT handle=0x{:x}",
+                total_us,
+                g_mhs3_wait_a_handle.load(std::memory_order_acquire)
+            );
+        }
+    }
 
     g_mhs3_wait_a_start = {};
     maybe_report_mhs3_wait_callsites();

@@ -386,31 +386,6 @@ std::optional<std::string> Hooks::hook_begin_rendering_only() {
         return "Failed to get via.Application";
     }
 
-    // MHS3 Build #14: one-time census of via.Application entries.
-    // Discovery only: do NOT hook or replace these entries.
-    spdlog::info("[MHS3 ENTRY CENSUS] BEGIN");
-
-    for (auto i = 0; i < 1024; ++i) {
-        auto census_entry = application->get_function(i);
-
-        if (census_entry == nullptr || census_entry->get_description() == nullptr) {
-            continue;
-        }
-
-        if (census_entry->func == nullptr) {
-            continue;
-        }
-
-        spdlog::info(
-            "[MHS3 ENTRY CENSUS] {} {} func={:x}",
-            i,
-            census_entry->get_description(),
-            (uintptr_t)census_entry->func
-        );
-    }
-
-    spdlog::info("[MHS3 ENTRY CENSUS] END");
-
     auto entry = application->get_function("BeginRendering");
 
     if (entry == nullptr) {
@@ -427,6 +402,221 @@ std::optional<std::string> Hooks::hook_begin_rendering_only() {
     spdlog::info("[Hooks] MHS3 diagnostic: hooked ONLY via.Application::BeginRendering");
 
     return std::nullopt;
+}
+
+
+namespace {
+struct MHS3EntryCadenceStats {
+    std::chrono::steady_clock::time_point last_call{};
+    std::chrono::steady_clock::time_point last_report{std::chrono::steady_clock::now()};
+
+    uint64_t call_count{0};
+
+    uint64_t gap_count{0};
+    uint64_t gap_total_us{0};
+    uint64_t gap_max_us{0};
+    uint64_t gap_over_50ms{0};
+    uint64_t gap_over_100ms{0};
+    uint64_t gap_over_200ms{0};
+
+    uint64_t original_count{0};
+    uint64_t original_total_us{0};
+    uint64_t original_max_us{0};
+};
+
+void run_mhs3_entry_cadence(
+    const char* name,
+    void* entry,
+    void (*original)(void*),
+    MHS3EntryCadenceStats& stats
+) {
+    if (original == nullptr) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    if (stats.last_call.time_since_epoch().count() != 0) {
+        const auto gap_us =
+            (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+                now - stats.last_call
+            ).count();
+
+        ++stats.gap_count;
+        stats.gap_total_us += gap_us;
+        stats.gap_max_us = std::max(stats.gap_max_us, gap_us);
+
+        if (gap_us >= 50000) {
+            ++stats.gap_over_50ms;
+        }
+
+        if (gap_us >= 100000) {
+            ++stats.gap_over_100ms;
+        }
+
+        if (gap_us >= 200000) {
+            ++stats.gap_over_200ms;
+        }
+    }
+
+    stats.last_call = now;
+    ++stats.call_count;
+
+    const auto original_start = std::chrono::steady_clock::now();
+
+    original(entry);
+
+    const auto original_us =
+        (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - original_start
+        ).count();
+
+    ++stats.original_count;
+    stats.original_total_us += original_us;
+    stats.original_max_us = std::max(stats.original_max_us, original_us);
+
+    const auto report_now = std::chrono::steady_clock::now();
+
+    if (report_now - stats.last_report >= std::chrono::seconds(5)) {
+        const double gap_avg_us =
+            stats.gap_count > 0
+                ? (double)stats.gap_total_us / (double)stats.gap_count
+                : 0.0;
+
+        const double original_avg_us =
+            stats.original_count > 0
+                ? (double)stats.original_total_us / (double)stats.original_count
+                : 0.0;
+
+        spdlog::info(
+            "[MHS3 EKG] {} calls={} Original avg={:.2f} us max={} us "
+            "Gap={} avg={:.2f} us max={} us >50ms={} >100ms={} >200ms={}",
+            name,
+            stats.call_count,
+            original_avg_us,
+            stats.original_max_us,
+            stats.gap_count,
+            gap_avg_us,
+            stats.gap_max_us,
+            stats.gap_over_50ms,
+            stats.gap_over_100ms,
+            stats.gap_over_200ms
+        );
+
+        stats.call_count = 0;
+
+        stats.gap_count = 0;
+        stats.gap_total_us = 0;
+        stats.gap_max_us = 0;
+        stats.gap_over_50ms = 0;
+        stats.gap_over_100ms = 0;
+        stats.gap_over_200ms = 0;
+
+        stats.original_count = 0;
+        stats.original_total_us = 0;
+        stats.original_max_us = 0;
+
+        stats.last_report = report_now;
+    }
+}
+}
+
+std::optional<std::string> Hooks::hook_mhs3_cadence_entries() {
+    auto application = sdk::Application::get();
+
+    if (application == nullptr) {
+        return "Failed to get via.Application";
+    }
+
+    auto install = [&](const char* name, void (**original)(void*), void (*hook)(void*)) -> std::optional<std::string> {
+        auto entry = application->get_function(name);
+
+        if (entry == nullptr) {
+            return std::string{"Unable to find via::Application::"} + name;
+        }
+
+        if (entry->func == nullptr) {
+            return std::string{"via::Application::"} + name + " is null";
+        }
+
+        *original = entry->func;
+        entry->func = hook;
+
+        spdlog::info("[Hooks] MHS3 diagnostic: hooked via.Application::{}", name);
+
+        return std::nullopt;
+    };
+
+    if (auto error = install(
+        "UpdateBehavior",
+        &m_update_behavior_original,
+        &update_behavior_hook
+    ); error.has_value()) {
+        return error;
+    }
+
+    if (auto error = install(
+        "PrepareRendering",
+        &m_prepare_rendering_original,
+        &prepare_rendering_hook
+    ); error.has_value()) {
+        return error;
+    }
+
+    if (auto error = install(
+        "WaitRendering",
+        &m_wait_rendering_original,
+        &wait_rendering_hook
+    ); error.has_value()) {
+        return error;
+    }
+
+    return std::nullopt;
+}
+
+void Hooks::update_behavior_hook_internal(void* entry) {
+    static MHS3EntryCadenceStats stats{};
+
+    run_mhs3_entry_cadence(
+        "UpdateBehavior",
+        entry,
+        m_update_behavior_original,
+        stats
+    );
+}
+
+void Hooks::update_behavior_hook(void* entry) {
+    g_hook->update_behavior_hook_internal(entry);
+}
+
+void Hooks::prepare_rendering_hook_internal(void* entry) {
+    static MHS3EntryCadenceStats stats{};
+
+    run_mhs3_entry_cadence(
+        "PrepareRendering",
+        entry,
+        m_prepare_rendering_original,
+        stats
+    );
+}
+
+void Hooks::prepare_rendering_hook(void* entry) {
+    g_hook->prepare_rendering_hook_internal(entry);
+}
+
+void Hooks::wait_rendering_hook_internal(void* entry) {
+    static MHS3EntryCadenceStats stats{};
+
+    run_mhs3_entry_cadence(
+        "WaitRendering",
+        entry,
+        m_wait_rendering_original,
+        stats
+    );
+}
+
+void Hooks::wait_rendering_hook(void* entry) {
+    g_hook->wait_rendering_hook_internal(entry);
 }
 
 void Hooks::begin_rendering_hook_internal(void* entry) {

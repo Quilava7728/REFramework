@@ -104,8 +104,18 @@ protected:
     static Matrix4x4f* camera_get_view_matrix_hook(REManagedObject* camera, Matrix4x4f* result);
 
 private:
-    // MHS3 diagnostic: install ONLY the BeginRendering application entry.
+    // MHS3 diagnostic: install ONLY the required selected application entries.
     std::optional<std::string> hook_begin_rendering_only();
+    std::optional<std::string> hook_mhs3_cadence_entries();
+
+    void update_behavior_hook_internal(void* entry);
+    static void update_behavior_hook(void* entry);
+
+    void prepare_rendering_hook_internal(void* entry);
+    static void prepare_rendering_hook(void* entry);
+
+    void wait_rendering_hook_internal(void* entry);
+    static void wait_rendering_hook(void* entry);
 
     std::optional<std::string> hook_update_transform();
     std::optional<std::string> hook_update_camera_controller();
@@ -142,13 +152,17 @@ private:
 
     std::vector<std::function<std::optional<std::string>()>> m_hook_list{
         // MHS3 diagnostic: do not hook every application entry.
-        // ScriptRunner only needs the BeginRendering heartbeat for this test.
+        // Keep BeginRendering for ScriptRunner and add only three cadence probes.
         HOOK_LAMBDA(hook_begin_rendering_only),
+        HOOK_LAMBDA(hook_mhs3_cadence_entries),
     };
 
 protected:
-    // Original MHS3 BeginRendering function pointer.
+    // Original MHS3 selected application-entry function pointers.
     void (*m_begin_rendering_original)(void*){nullptr};
+    void (*m_update_behavior_original)(void*){nullptr};
+    void (*m_prepare_rendering_original)(void*){nullptr};
+    void (*m_wait_rendering_original)(void*){nullptr};
 
     std::unique_ptr<FunctionHook> m_update_transform_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller_hook;

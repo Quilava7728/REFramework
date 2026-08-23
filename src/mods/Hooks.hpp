@@ -107,6 +107,12 @@ private:
     // MHS3 diagnostic: install ONLY the required selected application entries.
     std::optional<std::string> hook_begin_rendering_only();
     std::optional<std::string> hook_mhs3_cadence_entries();
+    std::optional<std::string> hook_mhs3_waitrendering_callsites();
+
+    static void mhs3_wait_a_before(safetyhook::Context& context);
+    static void mhs3_wait_a_after(safetyhook::Context& context);
+    static void mhs3_wait_b_before(safetyhook::Context& context);
+    static void mhs3_wait_b_after(safetyhook::Context& context);
 
     void update_behavior_hook_internal(void* entry);
     static void update_behavior_hook(void* entry);
@@ -155,6 +161,7 @@ private:
         // Keep BeginRendering for ScriptRunner and add only three cadence probes.
         HOOK_LAMBDA(hook_begin_rendering_only),
         HOOK_LAMBDA(hook_mhs3_cadence_entries),
+        HOOK_LAMBDA(hook_mhs3_waitrendering_callsites),
     };
 
 protected:
@@ -163,6 +170,11 @@ protected:
     void (*m_update_behavior_original)(void*){nullptr};
     void (*m_prepare_rendering_original)(void*){nullptr};
     void (*m_wait_rendering_original)(void*){nullptr};
+
+    safetyhook::MidHook m_mhs3_wait_a_before_hook{};
+    safetyhook::MidHook m_mhs3_wait_a_after_hook{};
+    safetyhook::MidHook m_mhs3_wait_b_before_hook{};
+    safetyhook::MidHook m_mhs3_wait_b_after_hook{};
 
     std::unique_ptr<FunctionHook> m_update_transform_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller_hook;

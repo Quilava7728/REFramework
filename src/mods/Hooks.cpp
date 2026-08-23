@@ -574,6 +574,205 @@ std::optional<std::string> Hooks::hook_mhs3_cadence_entries() {
     return std::nullopt;
 }
 
+
+namespace {
+struct MHS3WaitCallsiteStats {
+    uint64_t calls{0};
+    uint64_t total_us{0};
+    uint64_t max_us{0};
+    uint64_t over_50ms{0};
+    uint64_t over_100ms{0};
+    uint64_t over_200ms{0};
+    uint64_t over_500ms{0};
+};
+
+thread_local std::chrono::steady_clock::time_point g_mhs3_wait_a_start{};
+thread_local std::chrono::steady_clock::time_point g_mhs3_wait_b_start{};
+
+MHS3WaitCallsiteStats g_mhs3_wait_a_stats{};
+MHS3WaitCallsiteStats g_mhs3_wait_b_stats{};
+
+std::chrono::steady_clock::time_point g_mhs3_wait_last_report =
+    std::chrono::steady_clock::now();
+
+void record_mhs3_wait_duration(
+    MHS3WaitCallsiteStats& stats,
+    std::chrono::steady_clock::time_point start
+) {
+    if (start.time_since_epoch().count() == 0) {
+        return;
+    }
+
+    const auto elapsed_us =
+        (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start
+        ).count();
+
+    ++stats.calls;
+    stats.total_us += elapsed_us;
+    stats.max_us = std::max(stats.max_us, elapsed_us);
+
+    if (elapsed_us >= 50000) {
+        ++stats.over_50ms;
+    }
+
+    if (elapsed_us >= 100000) {
+        ++stats.over_100ms;
+    }
+
+    if (elapsed_us >= 200000) {
+        ++stats.over_200ms;
+    }
+
+    if (elapsed_us >= 500000) {
+        ++stats.over_500ms;
+    }
+}
+
+void maybe_report_mhs3_wait_callsites() {
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now - g_mhs3_wait_last_report < std::chrono::seconds(5)) {
+        return;
+    }
+
+    const double a_avg =
+        g_mhs3_wait_a_stats.calls > 0
+            ? (double)g_mhs3_wait_a_stats.total_us /
+              (double)g_mhs3_wait_a_stats.calls
+            : 0.0;
+
+    const double b_avg =
+        g_mhs3_wait_b_stats.calls > 0
+            ? (double)g_mhs3_wait_b_stats.total_us /
+              (double)g_mhs3_wait_b_stats.calls
+            : 0.0;
+
+    spdlog::info(
+        "[MHS3 WAIT EKG] "
+        "WaitA calls={} avg={:.2f} us max={} us "
+        ">50ms={} >100ms={} >200ms={} >500ms={} | "
+        "WaitB calls={} avg={:.2f} us max={} us "
+        ">50ms={} >100ms={} >200ms={} >500ms={}",
+        g_mhs3_wait_a_stats.calls,
+        a_avg,
+        g_mhs3_wait_a_stats.max_us,
+        g_mhs3_wait_a_stats.over_50ms,
+        g_mhs3_wait_a_stats.over_100ms,
+        g_mhs3_wait_a_stats.over_200ms,
+        g_mhs3_wait_a_stats.over_500ms,
+        g_mhs3_wait_b_stats.calls,
+        b_avg,
+        g_mhs3_wait_b_stats.max_us,
+        g_mhs3_wait_b_stats.over_50ms,
+        g_mhs3_wait_b_stats.over_100ms,
+        g_mhs3_wait_b_stats.over_200ms,
+        g_mhs3_wait_b_stats.over_500ms
+    );
+
+    g_mhs3_wait_a_stats = {};
+    g_mhs3_wait_b_stats = {};
+    g_mhs3_wait_last_report = now;
+}
+}
+
+std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
+    const auto base = (uintptr_t)g_framework->get_module();
+
+    // MHS3 Build #16:
+    // WaitRendering callsite A:
+    //   call @ RVA 0x236ff9
+    //   return/next instruction @ RVA 0x236fff
+    //
+    // WaitRendering callsite B:
+    //   call @ RVA 0x2370ba
+    //   return/next instruction @ RVA 0x2370c0
+    constexpr uintptr_t wait_a_before_rva = 0x236ff9;
+    constexpr uintptr_t wait_a_after_rva  = 0x236fff;
+    constexpr uintptr_t wait_b_before_rva = 0x2370ba;
+    constexpr uintptr_t wait_b_after_rva  = 0x2370c0;
+
+    const auto wait_a_before = base + wait_a_before_rva;
+    const auto wait_a_after  = base + wait_a_after_rva;
+    const auto wait_b_before = base + wait_b_before_rva;
+    const auto wait_b_after  = base + wait_b_after_rva;
+
+    spdlog::info(
+        "[MHS3 WAIT EKG] Installing WaitRendering callsite probes: "
+        "A {:x}->{:x}, B {:x}->{:x}",
+        wait_a_before,
+        wait_a_after,
+        wait_b_before,
+        wait_b_after
+    );
+
+    m_mhs3_wait_a_before_hook =
+        safetyhook::create_mid((void*)wait_a_before, &Hooks::mhs3_wait_a_before);
+
+    if (!m_mhs3_wait_a_before_hook) {
+        return "Failed to install MHS3 WaitRendering WaitA-before probe";
+    }
+
+    m_mhs3_wait_a_after_hook =
+        safetyhook::create_mid((void*)wait_a_after, &Hooks::mhs3_wait_a_after);
+
+    if (!m_mhs3_wait_a_after_hook) {
+        return "Failed to install MHS3 WaitRendering WaitA-after probe";
+    }
+
+    m_mhs3_wait_b_before_hook =
+        safetyhook::create_mid((void*)wait_b_before, &Hooks::mhs3_wait_b_before);
+
+    if (!m_mhs3_wait_b_before_hook) {
+        return "Failed to install MHS3 WaitRendering WaitB-before probe";
+    }
+
+    m_mhs3_wait_b_after_hook =
+        safetyhook::create_mid((void*)wait_b_after, &Hooks::mhs3_wait_b_after);
+
+    if (!m_mhs3_wait_b_after_hook) {
+        return "Failed to install MHS3 WaitRendering WaitB-after probe";
+    }
+
+    spdlog::info("[MHS3 WAIT EKG] WaitRendering callsite probes installed");
+
+    return std::nullopt;
+}
+
+void Hooks::mhs3_wait_a_before(safetyhook::Context& context) {
+    (void)context;
+    g_mhs3_wait_a_start = std::chrono::steady_clock::now();
+}
+
+void Hooks::mhs3_wait_a_after(safetyhook::Context& context) {
+    (void)context;
+
+    record_mhs3_wait_duration(
+        g_mhs3_wait_a_stats,
+        g_mhs3_wait_a_start
+    );
+
+    g_mhs3_wait_a_start = {};
+    maybe_report_mhs3_wait_callsites();
+}
+
+void Hooks::mhs3_wait_b_before(safetyhook::Context& context) {
+    (void)context;
+    g_mhs3_wait_b_start = std::chrono::steady_clock::now();
+}
+
+void Hooks::mhs3_wait_b_after(safetyhook::Context& context) {
+    (void)context;
+
+    record_mhs3_wait_duration(
+        g_mhs3_wait_b_stats,
+        g_mhs3_wait_b_start
+    );
+
+    g_mhs3_wait_b_start = {};
+    maybe_report_mhs3_wait_callsites();
+}
+
 void Hooks::update_behavior_hook_internal(void* entry) {
     static MHS3EntryCadenceStats stats{};
 

@@ -2,6 +2,7 @@
 
 #include "Mod.hpp"
 #include "utility/FunctionHook.hpp"
+#include "utility/FunctionHookMinHook.hpp"
 
 #include <sdk/Renderer.hpp>
 
@@ -113,7 +114,7 @@ private:
     static void mhs3_wait_a_after(safetyhook::Context& context);
     static void mhs3_wait_b_before(safetyhook::Context& context);
     static void mhs3_wait_b_after(safetyhook::Context& context);
-    static void mhs3_setevent_probe(safetyhook::Context& context);
+    static BOOL WINAPI mhs3_setevent_hook(HANDLE event);
 
     void update_behavior_hook_internal(void* entry);
     static void update_behavior_hook(void* entry);
@@ -176,7 +177,7 @@ protected:
     safetyhook::MidHook m_mhs3_wait_a_after_hook{};
     safetyhook::MidHook m_mhs3_wait_b_before_hook{};
     safetyhook::MidHook m_mhs3_wait_b_after_hook{};
-    safetyhook::MidHook m_mhs3_setevent_probe_hook{};
+    std::unique_ptr<FunctionHookMinHook> m_mhs3_setevent_hook{};
 
     std::unique_ptr<FunctionHook> m_update_transform_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller_hook;

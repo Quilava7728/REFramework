@@ -591,11 +591,23 @@ thread_local std::chrono::steady_clock::time_point g_mhs3_wait_b_start{};
 
 std::atomic<uintptr_t> g_mhs3_wait_a_handle{0};
 std::atomic<uint64_t> g_mhs3_wait_a_epoch{0};
+
+// Build #18:
+// Shared timestamps are required because WaitA is waited on by one thread
+// and signaled by another. The old thread_local wait start could never be
+// observed correctly from the signaling thread.
+std::atomic<uint64_t> g_mhs3_wait_a_start_us{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_epoch{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_us{0};
 
 MHS3WaitCallsiteStats g_mhs3_wait_a_stats{};
 MHS3WaitCallsiteStats g_mhs3_wait_b_stats{};
+
+static uint64_t mhs3_steady_now_us() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
 
 std::chrono::steady_clock::time_point g_mhs3_wait_last_report =
     std::chrono::steady_clock::now();
@@ -739,24 +751,35 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         return "Failed to install MHS3 WaitRendering WaitB-after probe";
     }
 
-    // Build #17:
-    // Probe the imported SetEvent thunk itself. At entry, RCX is the HANDLE.
-    // We ignore every event except the exact runtime WaitA handle captured
-    // immediately before WaitForSingleObject.
-    constexpr uintptr_t setevent_thunk_rva = 0x90c3a;
+    // Build #18:
+    // Hook the actual runtime SetEvent export instead of guessing at an
+    // executable-side thunk. Under Proton/Wine this resolves to the real
+    // implementation used by the game's IAT.
+    auto kernel32 = GetModuleHandleA("kernel32.dll");
 
-    const auto setevent_thunk = base + setevent_thunk_rva;
+    if (kernel32 == nullptr) {
+        return "Failed to get kernel32.dll for MHS3 SetEvent probe";
+    }
 
-    m_mhs3_setevent_probe_hook =
-        safetyhook::create_mid((void*)setevent_thunk, &Hooks::mhs3_setevent_probe);
+    auto setevent = GetProcAddress(kernel32, "SetEvent");
 
-    if (!m_mhs3_setevent_probe_hook) {
-        return "Failed to install MHS3 WaitA SetEvent probe";
+    if (setevent == nullptr) {
+        return "Failed to resolve runtime SetEvent for MHS3 probe";
+    }
+
+    m_mhs3_setevent_hook = std::make_unique<FunctionHookMinHook>(
+        setevent,
+        &Hooks::mhs3_setevent_hook
+    );
+
+    if (!m_mhs3_setevent_hook->create()) {
+        m_mhs3_setevent_hook.reset();
+        return "Failed to hook runtime SetEvent for MHS3 WaitA probe";
     }
 
     spdlog::info(
-        "[MHS3 WAIT EKG] WaitRendering callsite probes + SetEvent probe installed at {:x}",
-        setevent_thunk
+        "[MHS3 WAIT EKG] WaitRendering probes + runtime SetEvent hook installed at {:p}",
+        setevent
     );
 
     return std::nullopt;
@@ -764,44 +787,65 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
 
 void Hooks::mhs3_wait_a_before(safetyhook::Context& context) {
     const auto now = std::chrono::steady_clock::now();
+    const auto now_us = mhs3_steady_now_us();
 
     g_mhs3_wait_a_start = now;
 
-    // At this exact callsite, RCX is the HANDLE passed to
-    // WaitForSingleObject(WaitA, INFINITE).
-    g_mhs3_wait_a_handle.store((uintptr_t)context.rcx, std::memory_order_release);
+    // RCX is the exact HANDLE passed to WaitForSingleObject(WaitA, INFINITE).
+    g_mhs3_wait_a_handle.store(
+        (uintptr_t)context.rcx,
+        std::memory_order_release
+    );
 
     const auto epoch =
         g_mhs3_wait_a_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
 
+    // Shared across threads so the SetEvent thread can correlate itself with
+    // the currently outstanding WaitA.
+    g_mhs3_wait_a_start_us.store(now_us, std::memory_order_release);
     g_mhs3_wait_a_signal_epoch.store(0, std::memory_order_release);
     g_mhs3_wait_a_signal_us.store(0, std::memory_order_release);
 
     (void)epoch;
 }
 
-void Hooks::mhs3_setevent_probe(safetyhook::Context& context) {
+BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
     const auto wait_a_handle =
         g_mhs3_wait_a_handle.load(std::memory_order_acquire);
 
-    if (wait_a_handle == 0 || (uintptr_t)context.rcx != wait_a_handle) {
-        return;
+    if (
+        wait_a_handle != 0 &&
+        (uintptr_t)event == wait_a_handle
+    ) {
+        const auto epoch =
+            g_mhs3_wait_a_epoch.load(std::memory_order_acquire);
+
+        const auto start_us =
+            g_mhs3_wait_a_start_us.load(std::memory_order_acquire);
+
+        if (epoch != 0 && start_us != 0) {
+            const auto now_us = mhs3_steady_now_us();
+
+            if (now_us >= start_us) {
+                const auto elapsed_us = now_us - start_us;
+
+                g_mhs3_wait_a_signal_us.store(
+                    elapsed_us,
+                    std::memory_order_release
+                );
+
+                g_mhs3_wait_a_signal_epoch.store(
+                    epoch,
+                    std::memory_order_release
+                );
+            }
+        }
     }
 
-    const auto epoch =
-        g_mhs3_wait_a_epoch.load(std::memory_order_acquire);
+    auto original =
+        g_hook->m_mhs3_setevent_hook->get_original<decltype(SetEvent)>();
 
-    if (epoch == 0 || g_mhs3_wait_a_start.time_since_epoch().count() == 0) {
-        return;
-    }
-
-    const auto signal_us =
-        (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - g_mhs3_wait_a_start
-        ).count();
-
-    g_mhs3_wait_a_signal_us.store(signal_us, std::memory_order_release);
-    g_mhs3_wait_a_signal_epoch.store(epoch, std::memory_order_release);
+    return original(event);
 }
 
 void Hooks::mhs3_wait_a_after(safetyhook::Context& context) {
@@ -853,6 +897,8 @@ void Hooks::mhs3_wait_a_after(safetyhook::Context& context) {
     }
 
     g_mhs3_wait_a_start = {};
+    g_mhs3_wait_a_start_us.store(0, std::memory_order_release);
+
     maybe_report_mhs3_wait_callsites();
 }
 

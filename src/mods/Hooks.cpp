@@ -409,17 +409,22 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         return;
     }
 
-    // MHS3 Build #10 instrumentation.
+    // MHS3 Build #10/#11 instrumentation.
     static uint64_t begin_rendering_count = 0;
+
     static uint64_t script_runner_count = 0;
     static uint64_t script_runner_total_us = 0;
     static uint64_t script_runner_max_us = 0;
+
+    static uint64_t original_count = 0;
+    static uint64_t original_total_us = 0;
+    static uint64_t original_max_us = 0;
+
     static auto last_report = std::chrono::steady_clock::now();
 
     ++begin_rendering_count;
 
     // MHS3 diagnostic: run ONLY the Lua/ScriptRunner heartbeat.
-    // Do not run the full ImGui/REFramework frame pipeline.
     if (g_framework->is_game_data_initialized()) {
         const auto start = std::chrono::steady_clock::now();
 
@@ -442,29 +447,62 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         }
     }
 
+    // Build #11: time the game's real BeginRendering callback separately.
+    const auto original_start = std::chrono::steady_clock::now();
+
+    m_begin_rendering_original(entry);
+
+    const auto original_elapsed_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - original_start
+    ).count();
+
+    ++original_count;
+    original_total_us += original_elapsed_us;
+    original_max_us = std::max(original_max_us, original_elapsed_us);
+
+    if (original_elapsed_us >= 50000) {
+        spdlog::warn(
+            "[MHS3 EKG] Slow original BeginRendering: {} us ({:.2f} ms)",
+            original_elapsed_us,
+            original_elapsed_us / 1000.0
+        );
+    }
+
     const auto now = std::chrono::steady_clock::now();
 
     if (now - last_report >= std::chrono::seconds(5)) {
-        const double avg_us = script_runner_count > 0
+        const double script_avg_us = script_runner_count > 0
             ? (double)script_runner_total_us / (double)script_runner_count
             : 0.0;
 
+        const double original_avg_us = original_count > 0
+            ? (double)original_total_us / (double)original_count
+            : 0.0;
+
         spdlog::info(
-            "[MHS3 EKG] BeginRendering={} ScriptRunner={} avg={:.2f} us max={} us",
+            "[MHS3 EKG] BeginRendering={} ScriptRunner={} avg={:.2f} us max={} us "
+            "Original={} avg={:.2f} us max={} us",
             begin_rendering_count,
             script_runner_count,
-            avg_us,
-            script_runner_max_us
+            script_avg_us,
+            script_runner_max_us,
+            original_count,
+            original_avg_us,
+            original_max_us
         );
 
         begin_rendering_count = 0;
+
         script_runner_count = 0;
         script_runner_total_us = 0;
         script_runner_max_us = 0;
+
+        original_count = 0;
+        original_total_us = 0;
+        original_max_us = 0;
+
         last_report = now;
     }
-
-    m_begin_rendering_original(entry);
 }
 
 void Hooks::begin_rendering_hook(void* entry) {

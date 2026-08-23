@@ -1177,7 +1177,39 @@ void REFramework::on_frame_d3d12() {
         return;
     }
 
+    // MHS3 Build #11 instrumentation: GPU/command-context wait timing.
+    static uint64_t d3d12_wait_count = 0;
+    static uint64_t d3d12_wait_total_us = 0;
+    static uint64_t d3d12_wait_max_us = 0;
+
+    static uint64_t d3d12_submit_count = 0;
+    static uint64_t d3d12_submit_total_us = 0;
+    static uint64_t d3d12_submit_max_us = 0;
+
+    static auto d3d12_deep_last_report = std::chrono::steady_clock::now();
+
+    const auto d3d12_wait_start = std::chrono::steady_clock::now();
+
     cmd_ctx->wait(INFINITE);
+
+    const auto d3d12_wait_elapsed_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - d3d12_wait_start
+    ).count();
+
+    ++d3d12_wait_count;
+    d3d12_wait_total_us += d3d12_wait_elapsed_us;
+    d3d12_wait_max_us = std::max(d3d12_wait_max_us, d3d12_wait_elapsed_us);
+
+    if (d3d12_wait_elapsed_us >= 50000) {
+        spdlog::warn(
+            "[MHS3 EKG] Slow cmd_ctx->wait(INFINITE): {} us ({:.2f} ms)",
+            d3d12_wait_elapsed_us,
+            d3d12_wait_elapsed_us / 1000.0
+        );
+    }
+
+    const auto d3d12_submit_start = std::chrono::steady_clock::now();
+
     {
         std::scoped_lock _{ cmd_ctx->mtx };
         cmd_ctx->has_commands = true;
@@ -1229,6 +1261,55 @@ void REFramework::on_frame_d3d12() {
         cmd_ctx->cmd_list->ResourceBarrier(1, &barrier);
 
         cmd_ctx->execute();
+    }
+
+    const auto d3d12_submit_elapsed_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - d3d12_submit_start
+    ).count();
+
+    ++d3d12_submit_count;
+    d3d12_submit_total_us += d3d12_submit_elapsed_us;
+    d3d12_submit_max_us = std::max(d3d12_submit_max_us, d3d12_submit_elapsed_us);
+
+    if (d3d12_submit_elapsed_us >= 50000) {
+        spdlog::warn(
+            "[MHS3 EKG] Slow D3D12 overlay submit block: {} us ({:.2f} ms)",
+            d3d12_submit_elapsed_us,
+            d3d12_submit_elapsed_us / 1000.0
+        );
+    }
+
+    const auto d3d12_deep_now = std::chrono::steady_clock::now();
+
+    if (d3d12_deep_now - d3d12_deep_last_report >= std::chrono::seconds(5)) {
+        const double wait_avg_us = d3d12_wait_count > 0
+            ? (double)d3d12_wait_total_us / (double)d3d12_wait_count
+            : 0.0;
+
+        const double submit_avg_us = d3d12_submit_count > 0
+            ? (double)d3d12_submit_total_us / (double)d3d12_submit_count
+            : 0.0;
+
+        spdlog::info(
+            "[MHS3 EKG] D3D12 wait={} avg={:.2f} us max={} us "
+            "OverlaySubmit={} avg={:.2f} us max={} us",
+            d3d12_wait_count,
+            wait_avg_us,
+            d3d12_wait_max_us,
+            d3d12_submit_count,
+            submit_avg_us,
+            d3d12_submit_max_us
+        );
+
+        d3d12_wait_count = 0;
+        d3d12_wait_total_us = 0;
+        d3d12_wait_max_us = 0;
+
+        d3d12_submit_count = 0;
+        d3d12_submit_total_us = 0;
+        d3d12_submit_max_us = 0;
+
+        d3d12_deep_last_report = d3d12_deep_now;
     }
 
     if (is_init_ok) {

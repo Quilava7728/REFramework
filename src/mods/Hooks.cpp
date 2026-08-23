@@ -386,6 +386,31 @@ std::optional<std::string> Hooks::hook_begin_rendering_only() {
         return "Failed to get via.Application";
     }
 
+    // MHS3 Build #14: one-time census of via.Application entries.
+    // Discovery only: do NOT hook or replace these entries.
+    spdlog::info("[MHS3 ENTRY CENSUS] BEGIN");
+
+    for (auto i = 0; i < 1024; ++i) {
+        auto census_entry = application->get_function(i);
+
+        if (census_entry == nullptr || census_entry->get_description() == nullptr) {
+            continue;
+        }
+
+        if (census_entry->func == nullptr) {
+            continue;
+        }
+
+        spdlog::info(
+            "[MHS3 ENTRY CENSUS] {} {} func={:x}",
+            i,
+            census_entry->get_description(),
+            (uintptr_t)census_entry->func
+        );
+    }
+
+    spdlog::info("[MHS3 ENTRY CENSUS] END");
+
     auto entry = application->get_function("BeginRendering");
 
     if (entry == nullptr) {

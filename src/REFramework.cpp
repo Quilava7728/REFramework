@@ -1066,6 +1066,9 @@ void REFramework::on_frame_d3d12() {
     static uint64_t present_gap_count = 0;
     static uint64_t present_gap_total_us = 0;
     static uint64_t present_gap_max_us = 0;
+    static uint64_t present_gap_over_50ms = 0;
+    static uint64_t present_gap_over_100ms = 0;
+    static uint64_t present_gap_over_200ms = 0;
 
     const auto present_now = std::chrono::steady_clock::now();
 
@@ -1079,11 +1082,15 @@ void REFramework::on_frame_d3d12() {
         present_gap_max_us = std::max(present_gap_max_us, present_gap_us);
 
         if (present_gap_us >= 50000) {
-            spdlog::warn(
-                "[MHS3 EKG] D3D12 Present gap: {} us ({:.2f} ms)",
-                present_gap_us,
-                present_gap_us / 1000.0
-            );
+            ++present_gap_over_50ms;
+        }
+
+        if (present_gap_us >= 100000) {
+            ++present_gap_over_100ms;
+        }
+
+        if (present_gap_us >= 200000) {
+            ++present_gap_over_200ms;
         }
     }
 
@@ -1096,11 +1103,15 @@ void REFramework::on_frame_d3d12() {
             : 0.0;
 
         spdlog::info(
-            "[MHS3 EKG] D3D12 Present={} Gap={} avg={:.2f} us max={} us",
+            "[MHS3 EKG] D3D12 Present={} Gap={} avg={:.2f} us max={} us "
+            ">50ms={} >100ms={} >200ms={}",
             present_count,
             present_gap_count,
             present_gap_avg_us,
-            present_gap_max_us
+            present_gap_max_us,
+            present_gap_over_50ms,
+            present_gap_over_100ms,
+            present_gap_over_200ms
         );
 
         present_count = 0;
@@ -1108,6 +1119,9 @@ void REFramework::on_frame_d3d12() {
         present_gap_count = 0;
         present_gap_total_us = 0;
         present_gap_max_us = 0;
+        present_gap_over_50ms = 0;
+        present_gap_over_100ms = 0;
+        present_gap_over_200ms = 0;
 
         present_last_report = present_now;
     }

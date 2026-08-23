@@ -427,6 +427,9 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
     static uint64_t begin_gap_count = 0;
     static uint64_t begin_gap_total_us = 0;
     static uint64_t begin_gap_max_us = 0;
+    static uint64_t begin_gap_over_50ms = 0;
+    static uint64_t begin_gap_over_100ms = 0;
+    static uint64_t begin_gap_over_200ms = 0;
 
     const auto begin_now = std::chrono::steady_clock::now();
 
@@ -440,11 +443,15 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         begin_gap_max_us = std::max(begin_gap_max_us, begin_gap_us);
 
         if (begin_gap_us >= 50000) {
-            spdlog::warn(
-                "[MHS3 EKG] BeginRendering gap: {} us ({:.2f} ms)",
-                begin_gap_us,
-                begin_gap_us / 1000.0
-            );
+            ++begin_gap_over_50ms;
+        }
+
+        if (begin_gap_us >= 100000) {
+            ++begin_gap_over_100ms;
+        }
+
+        if (begin_gap_us >= 200000) {
+            ++begin_gap_over_200ms;
         }
     }
 
@@ -514,7 +521,7 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         spdlog::info(
             "[MHS3 EKG] BeginRendering={} ScriptRunner={} avg={:.2f} us max={} us "
             "Original={} avg={:.2f} us max={} us "
-            "Gap={} avg={:.2f} us max={} us",
+            "Gap={} avg={:.2f} us max={} us >50ms={} >100ms={} >200ms={}",
             begin_rendering_count,
             script_runner_count,
             script_avg_us,
@@ -524,7 +531,10 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
             original_max_us,
             begin_gap_count,
             begin_gap_avg_us,
-            begin_gap_max_us
+            begin_gap_max_us,
+            begin_gap_over_50ms,
+            begin_gap_over_100ms,
+            begin_gap_over_200ms
         );
 
         begin_rendering_count = 0;
@@ -540,6 +550,9 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         begin_gap_count = 0;
         begin_gap_total_us = 0;
         begin_gap_max_us = 0;
+        begin_gap_over_50ms = 0;
+        begin_gap_over_100ms = 0;
+        begin_gap_over_200ms = 0;
 
         last_report = now;
     }

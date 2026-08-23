@@ -1058,16 +1058,57 @@ void REFramework::on_post_present_d3d11() {
 void REFramework::on_frame_d3d12() {
     std::scoped_lock _{ m_imgui_mtx };
 
-    // MHS3 Build #10 instrumentation: raw D3D12 Present heartbeat.
+    // MHS3 Build #10/#12 instrumentation: raw D3D12 Present heartbeat + cadence.
     static uint64_t present_count = 0;
     static auto present_last_report = std::chrono::steady_clock::now();
 
-    ++present_count;
+    static auto last_present = std::chrono::steady_clock::time_point{};
+    static uint64_t present_gap_count = 0;
+    static uint64_t present_gap_total_us = 0;
+    static uint64_t present_gap_max_us = 0;
 
     const auto present_now = std::chrono::steady_clock::now();
+
+    if (last_present.time_since_epoch().count() != 0) {
+        const auto present_gap_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            present_now - last_present
+        ).count();
+
+        ++present_gap_count;
+        present_gap_total_us += present_gap_us;
+        present_gap_max_us = std::max(present_gap_max_us, present_gap_us);
+
+        if (present_gap_us >= 50000) {
+            spdlog::warn(
+                "[MHS3 EKG] D3D12 Present gap: {} us ({:.2f} ms)",
+                present_gap_us,
+                present_gap_us / 1000.0
+            );
+        }
+    }
+
+    last_present = present_now;
+
+    ++present_count;
     if (present_now - present_last_report >= std::chrono::seconds(5)) {
-        spdlog::info("[MHS3 EKG] D3D12 Present={}", present_count);
+        const double present_gap_avg_us = present_gap_count > 0
+            ? (double)present_gap_total_us / (double)present_gap_count
+            : 0.0;
+
+        spdlog::info(
+            "[MHS3 EKG] D3D12 Present={} Gap={} avg={:.2f} us max={} us",
+            present_count,
+            present_gap_count,
+            present_gap_avg_us,
+            present_gap_max_us
+        );
+
         present_count = 0;
+
+        present_gap_count = 0;
+        present_gap_total_us = 0;
+        present_gap_max_us = 0;
+
         present_last_report = present_now;
     }
 

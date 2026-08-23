@@ -422,6 +422,34 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
 
     static auto last_report = std::chrono::steady_clock::now();
 
+    // MHS3 Build #12 instrumentation: measure time between BeginRendering calls.
+    static auto last_begin_rendering = std::chrono::steady_clock::time_point{};
+    static uint64_t begin_gap_count = 0;
+    static uint64_t begin_gap_total_us = 0;
+    static uint64_t begin_gap_max_us = 0;
+
+    const auto begin_now = std::chrono::steady_clock::now();
+
+    if (last_begin_rendering.time_since_epoch().count() != 0) {
+        const auto begin_gap_us = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            begin_now - last_begin_rendering
+        ).count();
+
+        ++begin_gap_count;
+        begin_gap_total_us += begin_gap_us;
+        begin_gap_max_us = std::max(begin_gap_max_us, begin_gap_us);
+
+        if (begin_gap_us >= 50000) {
+            spdlog::warn(
+                "[MHS3 EKG] BeginRendering gap: {} us ({:.2f} ms)",
+                begin_gap_us,
+                begin_gap_us / 1000.0
+            );
+        }
+    }
+
+    last_begin_rendering = begin_now;
+
     ++begin_rendering_count;
 
     // MHS3 diagnostic: run ONLY the Lua/ScriptRunner heartbeat.
@@ -479,16 +507,24 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
             ? (double)original_total_us / (double)original_count
             : 0.0;
 
+        const double begin_gap_avg_us = begin_gap_count > 0
+            ? (double)begin_gap_total_us / (double)begin_gap_count
+            : 0.0;
+
         spdlog::info(
             "[MHS3 EKG] BeginRendering={} ScriptRunner={} avg={:.2f} us max={} us "
-            "Original={} avg={:.2f} us max={} us",
+            "Original={} avg={:.2f} us max={} us "
+            "Gap={} avg={:.2f} us max={} us",
             begin_rendering_count,
             script_runner_count,
             script_avg_us,
             script_runner_max_us,
             original_count,
             original_avg_us,
-            original_max_us
+            original_max_us,
+            begin_gap_count,
+            begin_gap_avg_us,
+            begin_gap_max_us
         );
 
         begin_rendering_count = 0;
@@ -500,6 +536,10 @@ void Hooks::begin_rendering_hook_internal(void* entry) {
         original_count = 0;
         original_total_us = 0;
         original_max_us = 0;
+
+        begin_gap_count = 0;
+        begin_gap_total_us = 0;
+        begin_gap_max_us = 0;
 
         last_report = now;
     }

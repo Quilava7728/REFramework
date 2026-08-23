@@ -114,8 +114,8 @@ private:
     void prepare_rendering_hook_internal(void* entry);
     static void prepare_rendering_hook(void* entry);
 
-    void wait_rendering_hook_internal(void* entry);
-    static void wait_rendering_hook(void* entry);
+    void mhs3_wait_rendering_hook_internal(void* entry);
+    static void mhs3_wait_rendering_hook(void* entry);
 
     std::optional<std::string> hook_update_transform();
     std::optional<std::string> hook_update_camera_controller();

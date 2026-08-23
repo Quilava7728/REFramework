@@ -566,7 +566,7 @@ std::optional<std::string> Hooks::hook_mhs3_cadence_entries() {
     if (auto error = install(
         "WaitRendering",
         &m_wait_rendering_original,
-        &wait_rendering_hook
+        &mhs3_wait_rendering_hook
     ); error.has_value()) {
         return error;
     }
@@ -604,7 +604,7 @@ void Hooks::prepare_rendering_hook(void* entry) {
     g_hook->prepare_rendering_hook_internal(entry);
 }
 
-void Hooks::wait_rendering_hook_internal(void* entry) {
+void Hooks::mhs3_wait_rendering_hook_internal(void* entry) {
     static MHS3EntryCadenceStats stats{};
 
     run_mhs3_entry_cadence(
@@ -615,8 +615,8 @@ void Hooks::wait_rendering_hook_internal(void* entry) {
     );
 }
 
-void Hooks::wait_rendering_hook(void* entry) {
-    g_hook->wait_rendering_hook_internal(entry);
+void Hooks::mhs3_wait_rendering_hook(void* entry) {
+    g_hook->mhs3_wait_rendering_hook_internal(entry);
 }
 
 void Hooks::begin_rendering_hook_internal(void* entry) {

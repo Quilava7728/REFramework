@@ -844,6 +844,25 @@ std::atomic<uintptr_t> g_mhs3_worker_wait_handle{0};
 std::atomic<uint64_t> g_mhs3_worker_wait_start_us{0};
 std::atomic<uint64_t> g_mhs3_worker_wait_epoch{0};
 
+// Build #26:
+// Three-stage upstream timing:
+//
+// A = producer SetEvent(+0x3a80), return RVA 0x003fef5f
+// B = thread 564 returns from Wait(+0x3a80), RVA 0x0482d745
+// C = thread 564 SetEvent(+0x3a70), return RVA 0x0482d7c1
+//
+// Keep absolute steady-clock timestamps so we can distinguish:
+//   before A
+//   A -> B
+//   B -> C
+std::atomic<uintptr_t> g_mhs3_upstream_wait_handle{0};
+std::atomic<uint64_t> g_mhs3_upstream_wait_start_us{0};
+std::atomic<uint64_t> g_mhs3_upstream_wait_epoch{0};
+std::atomic<uint64_t> g_mhs3_upstream_signal_us{0};
+std::atomic<uint64_t> g_mhs3_upstream_signal_epoch{0};
+std::atomic<uint64_t> g_mhs3_upstream_wake_us{0};
+std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1188,12 +1207,126 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
     const auto return_address =
         (uintptr_t)_ReturnAddress();
 
-    constexpr uintptr_t worker_wait_return_rva = 0x07992b4f;
-    const auto worker_wait_return =
-        game_base + worker_wait_return_rva;
+    constexpr uintptr_t downstream_wait_return_rva = 0x07992b4f;
+    constexpr uintptr_t upstream_wait_return_rva = 0x0482d745;
 
-    // Only instrument the exact worker call identified by Build #22/#23.
-    if (return_address != worker_wait_return) {
+    const auto downstream_wait_return =
+        game_base + downstream_wait_return_rva;
+
+    const auto upstream_wait_return =
+        game_base + upstream_wait_return_rva;
+
+    // --------------------------------------------------------
+    // Build #26 upstream wait:
+    // thread 564 waiting on object +0x3a80.
+    // --------------------------------------------------------
+    if (return_address == upstream_wait_return) {
+        const auto start_us = mhs3_steady_now_us();
+
+        const auto epoch =
+            g_mhs3_upstream_wait_epoch.fetch_add(
+                1,
+                std::memory_order_acq_rel
+            ) + 1;
+
+        g_mhs3_upstream_wait_handle.store(
+            (uintptr_t)handle,
+            std::memory_order_release
+        );
+
+        g_mhs3_upstream_wait_start_us.store(
+            start_us,
+            std::memory_order_release
+        );
+
+        g_mhs3_upstream_signal_us.store(
+            0,
+            std::memory_order_release
+        );
+
+        g_mhs3_upstream_signal_epoch.store(
+            0,
+            std::memory_order_release
+        );
+
+        const auto result = original(handle, timeout);
+        const auto end_us = mhs3_steady_now_us();
+
+        const auto signal_epoch =
+            g_mhs3_upstream_signal_epoch.load(
+                std::memory_order_acquire
+            );
+
+        const auto signal_us =
+            g_mhs3_upstream_signal_us.load(
+                std::memory_order_acquire
+            );
+
+        // B timestamp.
+        g_mhs3_upstream_wake_us.store(
+            end_us,
+            std::memory_order_release
+        );
+
+        g_mhs3_upstream_wake_epoch.store(
+            epoch,
+            std::memory_order_release
+        );
+
+        g_mhs3_upstream_wait_start_us.store(
+            0,
+            std::memory_order_release
+        );
+
+        const auto total_us =
+            end_us >= start_us
+                ? end_us - start_us
+                : 0;
+
+        if (total_us >= 50000) {
+            if (
+                signal_epoch == epoch &&
+                signal_us >= start_us &&
+                signal_us <= end_us
+            ) {
+                const auto wait_to_a_us =
+                    signal_us - start_us;
+
+                const auto a_to_b_us =
+                    end_us - signal_us;
+
+                spdlog::warn(
+                    "[MHS3 THREE-STAGE AB] "
+                    "total={} us wait_to_A={} us A_to_B={} us "
+                    "epoch={} handle=0x{:x} result=0x{:x}",
+                    total_us,
+                    wait_to_a_us,
+                    a_to_b_us,
+                    epoch,
+                    (uintptr_t)handle,
+                    result
+                );
+            } else {
+                spdlog::warn(
+                    "[MHS3 THREE-STAGE AB] "
+                    "total={} us NO_MATCHING_A "
+                    "epoch={} handle=0x{:x} result=0x{:x}",
+                    total_us,
+                    epoch,
+                    (uintptr_t)handle,
+                    result
+                );
+            }
+        }
+
+        return result;
+    }
+
+    // --------------------------------------------------------
+    // Existing downstream worker wait:
+    // thread 380 waiting on object +0x3a70.
+    // --------------------------------------------------------
+    if (return_address != downstream_wait_return) {
         return original(handle, timeout);
     }
 
@@ -1218,9 +1351,6 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
     const auto result = original(handle, timeout);
     const auto end_us = mhs3_steady_now_us();
 
-    // SetEvent has already happened before a successful wait can return.
-    // Clear the active timestamp immediately so later SetEvent traffic on
-    // the same HANDLE cannot be mistaken for the wait that just completed.
     g_mhs3_worker_wait_start_us.store(
         0,
         std::memory_order_release
@@ -1253,54 +1383,155 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
 }
 
 BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
-    // Build #25:
-    // Identify whoever wakes the worker that ultimately signals WaitA.
-    // The HANDLE was learned dynamically by mhs3_worker_wait_hook.
-    const auto worker_wait_handle =
-        g_mhs3_worker_wait_handle.load(std::memory_order_acquire);
+    // Build #26:
+    // Low-volume three-stage synchronization timing.
+    //
+    // A = producer signals +0x3a80, return RVA 0x003fef5f
+    // B = upstream Wait(+0x3a80) returns at RVA 0x0482d745
+    // C = thread 564 signals +0x3a70, return RVA 0x0482d7c1
 
-    const auto worker_wait_start_us =
-        g_mhs3_worker_wait_start_us.load(std::memory_order_acquire);
+    const auto game_base =
+        (uintptr_t)g_framework->get_module();
 
-    if (
-        worker_wait_handle != 0 &&
-        worker_wait_start_us != 0 &&
-        (uintptr_t)event == worker_wait_handle
-    ) {
-        const auto now_us = mhs3_steady_now_us();
+    const auto return_address =
+        (uintptr_t)_ReturnAddress();
 
-        if (now_us >= worker_wait_start_us) {
-            const auto elapsed_us =
-                now_us - worker_wait_start_us;
+    constexpr uintptr_t stage_a_return_rva = 0x003fef5f;
+    constexpr uintptr_t stage_c_return_rva = 0x0482d7c1;
 
-            const auto return_address =
-                (uintptr_t)_ReturnAddress();
+    const auto stage_a_return =
+        game_base + stage_a_return_rva;
 
-            const auto game_base =
-                (uintptr_t)g_framework->get_module();
+    const auto stage_c_return =
+        game_base + stage_c_return_rva;
 
-            uintptr_t game_rva = 0;
+    // --------------------------------------------------------
+    // Stage A:
+    // Producer signals the event that thread 564 waits on.
+    // --------------------------------------------------------
+    if (return_address == stage_a_return) {
+        const auto upstream_handle =
+            g_mhs3_upstream_wait_handle.load(
+                std::memory_order_acquire
+            );
 
+        const auto upstream_start_us =
+            g_mhs3_upstream_wait_start_us.load(
+                std::memory_order_acquire
+            );
+
+        const auto upstream_epoch =
+            g_mhs3_upstream_wait_epoch.load(
+                std::memory_order_acquire
+            );
+
+        if (
+            upstream_handle != 0 &&
+            upstream_start_us != 0 &&
+            (uintptr_t)event == upstream_handle
+        ) {
+            const auto now_us = mhs3_steady_now_us();
+
+            g_mhs3_upstream_signal_us.store(
+                now_us,
+                std::memory_order_release
+            );
+
+            g_mhs3_upstream_signal_epoch.store(
+                upstream_epoch,
+                std::memory_order_release
+            );
+
+            if (now_us >= upstream_start_us) {
+                const auto wait_to_a_us =
+                    now_us - upstream_start_us;
+
+                if (wait_to_a_us >= 50000) {
+                    spdlog::warn(
+                        "[MHS3 THREE-STAGE A] "
+                        "wait_to_A={} us epoch={} "
+                        "handle=0x{:x}",
+                        wait_to_a_us,
+                        upstream_epoch,
+                        upstream_handle
+                    );
+                }
+            }
+        }
+    }
+
+    // --------------------------------------------------------
+    // Stage C:
+    // Thread 564 signals the downstream worker event.
+    //
+    // Report only if either B->C itself is slow OR the
+    // downstream worker has already been blocked for >=50 ms.
+    // --------------------------------------------------------
+    if (return_address == stage_c_return) {
+        const auto worker_handle =
+            g_mhs3_worker_wait_handle.load(
+                std::memory_order_acquire
+            );
+
+        if (
+            worker_handle != 0 &&
+            (uintptr_t)event == worker_handle
+        ) {
+            const auto now_us = mhs3_steady_now_us();
+
+            const auto upstream_wake_us =
+                g_mhs3_upstream_wake_us.load(
+                    std::memory_order_acquire
+                );
+
+            const auto upstream_wake_epoch =
+                g_mhs3_upstream_wake_epoch.load(
+                    std::memory_order_acquire
+                );
+
+            const auto worker_start_us =
+                g_mhs3_worker_wait_start_us.load(
+                    std::memory_order_acquire
+                );
+
+            uint64_t b_to_c_us = 0;
+            uint64_t downstream_wait_us = 0;
+
+            // Ignore obviously stale B timestamps.
             if (
-                game_base != 0 &&
-                return_address >= game_base
+                upstream_wake_us != 0 &&
+                now_us >= upstream_wake_us &&
+                now_us - upstream_wake_us <= 1000000
             ) {
-                game_rva = return_address - game_base;
+                b_to_c_us = now_us - upstream_wake_us;
             }
 
-            spdlog::warn(
-                "[MHS3 WORKER SIGNALER] "
-                "tid={} return_address=0x{:x} game_rva=0x{:x} "
-                "worker_wait={} us worker_epoch={} handle=0x{:x}",
-                GetCurrentThreadId(),
-                return_address,
-                game_rva,
-                elapsed_us,
-                g_mhs3_worker_wait_epoch.load(
-                    std::memory_order_acquire
-                ),
-                worker_wait_handle
-            );
+            if (
+                worker_start_us != 0 &&
+                now_us >= worker_start_us
+            ) {
+                downstream_wait_us =
+                    now_us - worker_start_us;
+            }
+
+            if (
+                b_to_c_us >= 50000 ||
+                downstream_wait_us >= 50000
+            ) {
+                spdlog::warn(
+                    "[MHS3 THREE-STAGE C] "
+                    "B_to_C={} us downstream_wait={} us "
+                    "upstream_epoch={} worker_epoch={} "
+                    "handle=0x{:x}",
+                    b_to_c_us,
+                    downstream_wait_us,
+                    upstream_wake_epoch,
+                    g_mhs3_worker_wait_epoch.load(
+                        std::memory_order_acquire
+                    ),
+                    worker_handle
+                );
+            }
         }
     }
 

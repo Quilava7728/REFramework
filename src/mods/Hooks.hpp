@@ -114,13 +114,12 @@ private:
     static void mhs3_wait_a_after(safetyhook::Context& context);
     static void mhs3_wait_b_before(safetyhook::Context& context);
     static void mhs3_wait_b_after(safetyhook::Context& context);
-
-    // Build #23: time the signaling worker's blocking wait.
-    static void mhs3_worker_wait_before(safetyhook::Context& context);
-    static void mhs3_worker_wait_after(safetyhook::Context& context);
-
     static void mhs3_crash_state_probe(safetyhook::Context& context);
     static BOOL WINAPI mhs3_setevent_hook(HANDLE event);
+
+    // Build #24:
+    // Runtime hook for the wait-like primitive used by the signaling worker.
+    static DWORD WINAPI mhs3_worker_wait_hook(HANDLE handle, DWORD timeout);
 
     void update_behavior_hook_internal(void* entry);
     static void update_behavior_hook(void* entry);
@@ -183,13 +182,11 @@ protected:
     safetyhook::MidHook m_mhs3_wait_a_after_hook{};
     safetyhook::MidHook m_mhs3_wait_b_before_hook{};
     safetyhook::MidHook m_mhs3_wait_b_after_hook{};
-
-    // Build #23.
-    safetyhook::MidHook m_mhs3_worker_wait_before_hook{};
-    safetyhook::MidHook m_mhs3_worker_wait_after_hook{};
-
     safetyhook::MidHook m_mhs3_crash_state_hook{};
     std::unique_ptr<FunctionHookMinHook> m_mhs3_setevent_hook{};
+
+    // Build #24.
+    std::unique_ptr<FunctionHookMinHook> m_mhs3_worker_wait_hook{};
 
     std::unique_ptr<FunctionHook> m_update_transform_hook;
     std::unique_ptr<FunctionHook> m_update_camera_controller_hook;

@@ -825,6 +825,14 @@ struct MHS3WaitCallsiteStats {
 thread_local std::chrono::steady_clock::time_point g_mhs3_wait_a_start{};
 thread_local std::chrono::steady_clock::time_point g_mhs3_wait_b_start{};
 
+// Build #23:
+// This wait belongs to the worker path that eventually signals WaitA.
+// Thread-local state is appropriate because before/after execute on the
+// same signaling worker thread.
+thread_local uint64_t g_mhs3_worker_wait_start_us{0};
+thread_local uintptr_t g_mhs3_worker_wait_handle{0};
+thread_local uint32_t g_mhs3_worker_wait_timeout{0};
+
 std::atomic<uintptr_t> g_mhs3_wait_a_handle{0};
 std::atomic<uint64_t> g_mhs3_wait_a_epoch{0};
 
@@ -1011,6 +1019,48 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     if (!m_mhs3_wait_b_after_hook) {
         return "Failed to install MHS3 WaitRendering WaitB-after probe";
     }
+
+    // Build #23:
+    // Worker loop identified from the Build #22 signaling stack:
+    //
+    //   RVA 0x07992b41  mov 0x3a70(%rsi), %rcx
+    //   RVA 0x07992b48  mov $0xffffffff, %edx
+    //   RVA 0x07992b4d  call *%rdi
+    //   RVA 0x07992b4f  mov 0x35b8(%rsi), %al
+    //
+    // Time only this exact wait call. The hook does not modify RCX, RDX,
+    // the return value, or control flow.
+    constexpr uintptr_t worker_wait_before_rva = 0x07992b4d;
+    constexpr uintptr_t worker_wait_after_rva  = 0x07992b4f;
+
+    const auto worker_wait_before = base + worker_wait_before_rva;
+    const auto worker_wait_after  = base + worker_wait_after_rva;
+
+    m_mhs3_worker_wait_before_hook =
+        safetyhook::create_mid(
+            (void*)worker_wait_before,
+            &Hooks::mhs3_worker_wait_before
+        );
+
+    if (!m_mhs3_worker_wait_before_hook) {
+        return "Failed to install MHS3 worker-wait before probe";
+    }
+
+    m_mhs3_worker_wait_after_hook =
+        safetyhook::create_mid(
+            (void*)worker_wait_after,
+            &Hooks::mhs3_worker_wait_after
+        );
+
+    if (!m_mhs3_worker_wait_after_hook) {
+        return "Failed to install MHS3 worker-wait after probe";
+    }
+
+    spdlog::info(
+        "[MHS3 WORKER WAIT] probes installed at 0x{:x}->0x{:x}",
+        worker_wait_before,
+        worker_wait_after
+    );
 
     // Build #19:
     // Crash site from the Build #18 minidump:
@@ -1318,6 +1368,48 @@ void Hooks::mhs3_wait_b_after(safetyhook::Context& context) {
 
     g_mhs3_wait_b_start = {};
     maybe_report_mhs3_wait_callsites();
+}
+
+void Hooks::mhs3_worker_wait_before(safetyhook::Context& context) {
+    g_mhs3_worker_wait_start_us = mhs3_steady_now_us();
+    g_mhs3_worker_wait_handle = (uintptr_t)context.rcx;
+    g_mhs3_worker_wait_timeout = (uint32_t)context.rdx;
+}
+
+void Hooks::mhs3_worker_wait_after(safetyhook::Context& context) {
+    const auto start_us = g_mhs3_worker_wait_start_us;
+
+    if (start_us == 0) {
+        return;
+    }
+
+    const auto now_us = mhs3_steady_now_us();
+    const auto elapsed_us =
+        now_us >= start_us
+            ? now_us - start_us
+            : 0;
+
+    // RAX contains the return value from the wait-like primitive.
+    const auto result = (uint32_t)context.rax;
+
+    if (elapsed_us >= 50000) {
+        spdlog::warn(
+            "[MHS3 WORKER WAIT] "
+            "tid={} duration={} us handle=0x{:x} timeout=0x{:x} result=0x{:x} "
+            "waitA_epoch={} waitA_handle=0x{:x}",
+            GetCurrentThreadId(),
+            elapsed_us,
+            g_mhs3_worker_wait_handle,
+            g_mhs3_worker_wait_timeout,
+            result,
+            g_mhs3_wait_a_epoch.load(std::memory_order_acquire),
+            g_mhs3_wait_a_handle.load(std::memory_order_acquire)
+        );
+    }
+
+    g_mhs3_worker_wait_start_us = 0;
+    g_mhs3_worker_wait_handle = 0;
+    g_mhs3_worker_wait_timeout = 0;
 }
 
 void Hooks::update_behavior_hook_internal(void* entry) {

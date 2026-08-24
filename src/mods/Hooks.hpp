@@ -114,6 +114,11 @@ private:
     static void mhs3_wait_a_after(safetyhook::Context& context);
     static void mhs3_wait_b_before(safetyhook::Context& context);
     static void mhs3_wait_b_after(safetyhook::Context& context);
+
+    // Build #23: time the signaling worker's blocking wait.
+    static void mhs3_worker_wait_before(safetyhook::Context& context);
+    static void mhs3_worker_wait_after(safetyhook::Context& context);
+
     static void mhs3_crash_state_probe(safetyhook::Context& context);
     static BOOL WINAPI mhs3_setevent_hook(HANDLE event);
 
@@ -178,6 +183,11 @@ protected:
     safetyhook::MidHook m_mhs3_wait_a_after_hook{};
     safetyhook::MidHook m_mhs3_wait_b_before_hook{};
     safetyhook::MidHook m_mhs3_wait_b_after_hook{};
+
+    // Build #23.
+    safetyhook::MidHook m_mhs3_worker_wait_before_hook{};
+    safetyhook::MidHook m_mhs3_worker_wait_after_hook{};
+
     safetyhook::MidHook m_mhs3_crash_state_hook{};
     std::unique_ptr<FunctionHookMinHook> m_mhs3_setevent_hook{};
 

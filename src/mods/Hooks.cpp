@@ -1197,6 +1197,48 @@ BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
                     epoch,
                     wait_a_handle
                 );
+
+                // Build #22:
+                // For genuinely slow WaitA signals, capture a small raw
+                // stack from the signaling thread. Do not symbolize here;
+                // logging raw addresses keeps this probe lightweight and
+                // avoids doing expensive module/symbol work in SetEvent.
+                if (elapsed_us >= 50000) {
+                    void* frames[12]{};
+
+                    const auto frame_count =
+                        CaptureStackBackTrace(
+                            0,
+                            (DWORD)std::size(frames),
+                            frames,
+                            nullptr
+                        );
+
+                    spdlog::warn(
+                        "[MHS3 WAITA STACK] "
+                        "tid={} wait_to_signal={} us epoch={} "
+                        "frames={} "
+                        "f0=0x{:x} f1=0x{:x} f2=0x{:x} f3=0x{:x} "
+                        "f4=0x{:x} f5=0x{:x} f6=0x{:x} f7=0x{:x} "
+                        "f8=0x{:x} f9=0x{:x} f10=0x{:x} f11=0x{:x}",
+                        GetCurrentThreadId(),
+                        elapsed_us,
+                        epoch,
+                        frame_count,
+                        frame_count > 0 ? (uintptr_t)frames[0] : 0,
+                        frame_count > 1 ? (uintptr_t)frames[1] : 0,
+                        frame_count > 2 ? (uintptr_t)frames[2] : 0,
+                        frame_count > 3 ? (uintptr_t)frames[3] : 0,
+                        frame_count > 4 ? (uintptr_t)frames[4] : 0,
+                        frame_count > 5 ? (uintptr_t)frames[5] : 0,
+                        frame_count > 6 ? (uintptr_t)frames[6] : 0,
+                        frame_count > 7 ? (uintptr_t)frames[7] : 0,
+                        frame_count > 8 ? (uintptr_t)frames[8] : 0,
+                        frame_count > 9 ? (uintptr_t)frames[9] : 0,
+                        frame_count > 10 ? (uintptr_t)frames[10] : 0,
+                        frame_count > 11 ? (uintptr_t)frames[11] : 0
+                    );
+                }
             }
         }
     }

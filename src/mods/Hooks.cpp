@@ -836,6 +836,14 @@ std::atomic<uint64_t> g_mhs3_wait_a_start_us{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_epoch{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_us{0};
 
+// Build #25:
+// Dynamically remember the event that blocks the signaling worker.
+// Handle values are intentionally NOT hardcoded because Wine/Windows
+// HANDLE values can change between launches.
+std::atomic<uintptr_t> g_mhs3_worker_wait_handle{0};
+std::atomic<uint64_t> g_mhs3_worker_wait_start_us{0};
+std::atomic<uint64_t> g_mhs3_worker_wait_epoch{0};
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1190,8 +1198,33 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
     }
 
     const auto start_us = mhs3_steady_now_us();
+
+    const auto worker_epoch =
+        g_mhs3_worker_wait_epoch.fetch_add(
+            1,
+            std::memory_order_acq_rel
+        ) + 1;
+
+    g_mhs3_worker_wait_handle.store(
+        (uintptr_t)handle,
+        std::memory_order_release
+    );
+
+    g_mhs3_worker_wait_start_us.store(
+        start_us,
+        std::memory_order_release
+    );
+
     const auto result = original(handle, timeout);
     const auto end_us = mhs3_steady_now_us();
+
+    // SetEvent has already happened before a successful wait can return.
+    // Clear the active timestamp immediately so later SetEvent traffic on
+    // the same HANDLE cannot be mistaken for the wait that just completed.
+    g_mhs3_worker_wait_start_us.store(
+        0,
+        std::memory_order_release
+    );
 
     const auto elapsed_us =
         end_us >= start_us
@@ -1202,7 +1235,7 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
         spdlog::warn(
             "[MHS3 WORKER WAIT] "
             "tid={} duration={} us handle=0x{:x} timeout=0x{:x} "
-            "result=0x{:x} caller=0x{:x} "
+            "result=0x{:x} caller=0x{:x} worker_epoch={} "
             "waitA_epoch={} waitA_handle=0x{:x}",
             GetCurrentThreadId(),
             elapsed_us,
@@ -1210,6 +1243,7 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
             timeout,
             result,
             return_address,
+            worker_epoch,
             g_mhs3_wait_a_epoch.load(std::memory_order_acquire),
             g_mhs3_wait_a_handle.load(std::memory_order_acquire)
         );
@@ -1219,6 +1253,57 @@ DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
 }
 
 BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
+    // Build #25:
+    // Identify whoever wakes the worker that ultimately signals WaitA.
+    // The HANDLE was learned dynamically by mhs3_worker_wait_hook.
+    const auto worker_wait_handle =
+        g_mhs3_worker_wait_handle.load(std::memory_order_acquire);
+
+    const auto worker_wait_start_us =
+        g_mhs3_worker_wait_start_us.load(std::memory_order_acquire);
+
+    if (
+        worker_wait_handle != 0 &&
+        worker_wait_start_us != 0 &&
+        (uintptr_t)event == worker_wait_handle
+    ) {
+        const auto now_us = mhs3_steady_now_us();
+
+        if (now_us >= worker_wait_start_us) {
+            const auto elapsed_us =
+                now_us - worker_wait_start_us;
+
+            const auto return_address =
+                (uintptr_t)_ReturnAddress();
+
+            const auto game_base =
+                (uintptr_t)g_framework->get_module();
+
+            uintptr_t game_rva = 0;
+
+            if (
+                game_base != 0 &&
+                return_address >= game_base
+            ) {
+                game_rva = return_address - game_base;
+            }
+
+            spdlog::warn(
+                "[MHS3 WORKER SIGNALER] "
+                "tid={} return_address=0x{:x} game_rva=0x{:x} "
+                "worker_wait={} us worker_epoch={} handle=0x{:x}",
+                GetCurrentThreadId(),
+                return_address,
+                game_rva,
+                elapsed_us,
+                g_mhs3_worker_wait_epoch.load(
+                    std::memory_order_acquire
+                ),
+                worker_wait_handle
+            );
+        }
+    }
+
     const auto wait_a_handle =
         g_mhs3_wait_a_handle.load(std::memory_order_acquire);
 

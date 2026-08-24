@@ -116,6 +116,15 @@ private:
     static void mhs3_wait_b_after(safetyhook::Context& context);
     static void mhs3_crash_state_probe(safetyhook::Context& context);
 
+    // Build #29: call timing inside the producer's slowest object iteration.
+    static void mhs3_producer_virtual18_before(safetyhook::Context& context);
+    static void mhs3_producer_virtual18_after(safetyhook::Context& context);
+    static void mhs3_producer_alt_virtual10_before(safetyhook::Context& context);
+    static void mhs3_producer_alt_virtual10_after(safetyhook::Context& context);
+    static void mhs3_producer_helper_ff180_before(safetyhook::Context& context);
+    static void mhs3_producer_helper_ff180_after(safetyhook::Context& context);
+    static void mhs3_producer_helper_001000_before(safetyhook::Context& context);
+
     // Build #28: individual producer object-loop iteration probes.
     static void mhs3_producer_object_loop_begin(safetyhook::Context& context);
     static void mhs3_producer_object_loop_end(safetyhook::Context& context);
@@ -197,6 +206,15 @@ protected:
     safetyhook::MidHook m_mhs3_crash_state_hook{};
 
     // Build #27: Stage-A producer timing checkpoints.
+    // Build #29: timing around individual calls inside each object iteration.
+    safetyhook::MidHook m_mhs3_producer_virtual18_before_hook{};
+    safetyhook::MidHook m_mhs3_producer_virtual18_after_hook{};
+    safetyhook::MidHook m_mhs3_producer_alt_virtual10_before_hook{};
+    safetyhook::MidHook m_mhs3_producer_alt_virtual10_after_hook{};
+    safetyhook::MidHook m_mhs3_producer_helper_ff180_before_hook{};
+    safetyhook::MidHook m_mhs3_producer_helper_ff180_after_hook{};
+    safetyhook::MidHook m_mhs3_producer_helper_001000_before_hook{};
+
     // Build #28: individual producer object-loop iteration probes.
     safetyhook::MidHook m_mhs3_producer_object_loop_begin_hook{};
     safetyhook::MidHook m_mhs3_producer_object_loop_end_hook{};

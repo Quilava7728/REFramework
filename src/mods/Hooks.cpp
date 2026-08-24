@@ -893,6 +893,22 @@ thread_local uint64_t g_mhs3_object_loop_max_us = 0;
 thread_local uintptr_t g_mhs3_object_loop_current_object = 0;
 thread_local uintptr_t g_mhs3_object_loop_max_object = 0;
 
+// Build #29:
+// Break the slowest Build #28 object iteration into individual call buckets.
+//
+// Per-current-iteration timing state.
+thread_local uint64_t g_mhs3_object_call_start_us = 0;
+thread_local uint64_t g_mhs3_object_virtual18_us = 0;
+thread_local uint64_t g_mhs3_object_alt_virtual10_us = 0;
+thread_local uint64_t g_mhs3_object_helper_ff180_us = 0;
+thread_local uint64_t g_mhs3_object_helper_001000_us = 0;
+
+// Snapshot belonging to the slowest iteration in the current producer cycle.
+thread_local uint64_t g_mhs3_object_max_virtual18_us = 0;
+thread_local uint64_t g_mhs3_object_max_alt_virtual10_us = 0;
+thread_local uint64_t g_mhs3_object_max_helper_ff180_us = 0;
+thread_local uint64_t g_mhs3_object_max_helper_001000_us = 0;
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1080,6 +1096,110 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     // Build #28: individual object-loop iteration timing.
     constexpr uintptr_t producer_object_loop_begin_rva = 0x03fee8a;
     constexpr uintptr_t producer_object_loop_end_rva   = 0x03fef06;
+
+    // Build #29: calls inside one producer object iteration.
+    constexpr uintptr_t producer_virtual18_before_rva =
+        0x03fee9a;
+    constexpr uintptr_t producer_virtual18_after_rva =
+        0x03fee9d;
+
+    constexpr uintptr_t producer_alt_virtual10_before_rva =
+        0x03ff072;
+    constexpr uintptr_t producer_alt_virtual10_after_rva =
+        0x03ff076;
+
+    constexpr uintptr_t producer_helper_ff180_before_rva =
+        0x03feef9;
+    constexpr uintptr_t producer_helper_ff180_after_rva =
+        0x03feefe;
+
+    constexpr uintptr_t producer_helper_001000_before_rva =
+        0x03fef01;
+
+    // Build #29: time the individual calls made inside each object
+    // iteration. These probes do not log directly.
+    m_mhs3_producer_virtual18_before_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_virtual18_before_rva),
+            &Hooks::mhs3_producer_virtual18_before
+        );
+
+    if (!m_mhs3_producer_virtual18_before_hook) {
+        return "Failed to install MHS3 producer virtual18-before probe";
+    }
+
+    m_mhs3_producer_virtual18_after_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_virtual18_after_rva),
+            &Hooks::mhs3_producer_virtual18_after
+        );
+
+    if (!m_mhs3_producer_virtual18_after_hook) {
+        return "Failed to install MHS3 producer virtual18-after probe";
+    }
+
+    m_mhs3_producer_alt_virtual10_before_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_alt_virtual10_before_rva),
+            &Hooks::mhs3_producer_alt_virtual10_before
+        );
+
+    if (!m_mhs3_producer_alt_virtual10_before_hook) {
+        return "Failed to install MHS3 producer alt-virtual10-before probe";
+    }
+
+    m_mhs3_producer_alt_virtual10_after_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_alt_virtual10_after_rva),
+            &Hooks::mhs3_producer_alt_virtual10_after
+        );
+
+    if (!m_mhs3_producer_alt_virtual10_after_hook) {
+        return "Failed to install MHS3 producer alt-virtual10-after probe";
+    }
+
+    m_mhs3_producer_helper_ff180_before_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_helper_ff180_before_rva),
+            &Hooks::mhs3_producer_helper_ff180_before
+        );
+
+    if (!m_mhs3_producer_helper_ff180_before_hook) {
+        return "Failed to install MHS3 producer ff180-before probe";
+    }
+
+    m_mhs3_producer_helper_ff180_after_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_helper_ff180_after_rva),
+            &Hooks::mhs3_producer_helper_ff180_after
+        );
+
+    if (!m_mhs3_producer_helper_ff180_after_hook) {
+        return "Failed to install MHS3 producer ff180-after probe";
+    }
+
+    m_mhs3_producer_helper_001000_before_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_helper_001000_before_rva),
+            &Hooks::mhs3_producer_helper_001000_before
+        );
+
+    if (!m_mhs3_producer_helper_001000_before_hook) {
+        return "Failed to install MHS3 producer 001000-before probe";
+    }
+
+    spdlog::info(
+        "[MHS3 OBJECT CALLS] probes installed: "
+        "v18=0x{:x}->0x{:x} altv10=0x{:x}->0x{:x} "
+        "ff180=0x{:x}->0x{:x} 001000=0x{:x}->loop-end",
+        base + producer_virtual18_before_rva,
+        base + producer_virtual18_after_rva,
+        base + producer_alt_virtual10_before_rva,
+        base + producer_alt_virtual10_after_rva,
+        base + producer_helper_ff180_before_rva,
+        base + producer_helper_ff180_after_rva,
+        base + producer_helper_001000_before_rva
+    );
 
     m_mhs3_producer_object_loop_begin_hook =
         safetyhook::create_mid(
@@ -1274,6 +1394,17 @@ void Hooks::mhs3_producer_p0(safetyhook::Context& context) {
     g_mhs3_object_loop_max_us = 0;
     g_mhs3_object_loop_current_object = 0;
     g_mhs3_object_loop_max_object = 0;
+
+    g_mhs3_object_call_start_us = 0;
+    g_mhs3_object_virtual18_us = 0;
+    g_mhs3_object_alt_virtual10_us = 0;
+    g_mhs3_object_helper_ff180_us = 0;
+    g_mhs3_object_helper_001000_us = 0;
+
+    g_mhs3_object_max_virtual18_us = 0;
+    g_mhs3_object_max_alt_virtual10_us = 0;
+    g_mhs3_object_max_helper_ff180_us = 0;
+    g_mhs3_object_max_helper_001000_us = 0;
 }
 
 void Hooks::mhs3_producer_object_loop_begin(
@@ -1285,6 +1416,106 @@ void Hooks::mhs3_producer_object_loop_begin(
 
     g_mhs3_object_loop_current_object = (uintptr_t)context.rbx;
     g_mhs3_object_loop_iteration_start_us = mhs3_steady_now_us();
+
+    g_mhs3_object_call_start_us = 0;
+    g_mhs3_object_virtual18_us = 0;
+    g_mhs3_object_alt_virtual10_us = 0;
+    g_mhs3_object_helper_ff180_us = 0;
+    g_mhs3_object_helper_001000_us = 0;
+}
+
+void Hooks::mhs3_producer_virtual18_before(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    if (g_mhs3_object_loop_iteration_start_us != 0) {
+        g_mhs3_object_call_start_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_virtual18_after(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto start_us = g_mhs3_object_call_start_us;
+
+    if (start_us != 0) {
+        const auto now_us = mhs3_steady_now_us();
+
+        if (now_us >= start_us) {
+            g_mhs3_object_virtual18_us += now_us - start_us;
+        }
+    }
+
+    g_mhs3_object_call_start_us = 0;
+}
+
+void Hooks::mhs3_producer_alt_virtual10_before(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    if (g_mhs3_object_loop_iteration_start_us != 0) {
+        g_mhs3_object_call_start_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_alt_virtual10_after(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto start_us = g_mhs3_object_call_start_us;
+
+    if (start_us != 0) {
+        const auto now_us = mhs3_steady_now_us();
+
+        if (now_us >= start_us) {
+            g_mhs3_object_alt_virtual10_us += now_us - start_us;
+        }
+    }
+
+    g_mhs3_object_call_start_us = 0;
+}
+
+void Hooks::mhs3_producer_helper_ff180_before(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    if (g_mhs3_object_loop_iteration_start_us != 0) {
+        g_mhs3_object_call_start_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_helper_ff180_after(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto start_us = g_mhs3_object_call_start_us;
+
+    if (start_us != 0) {
+        const auto now_us = mhs3_steady_now_us();
+
+        if (now_us >= start_us) {
+            g_mhs3_object_helper_ff180_us += now_us - start_us;
+        }
+    }
+
+    g_mhs3_object_call_start_us = 0;
+}
+
+void Hooks::mhs3_producer_helper_001000_before(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    if (g_mhs3_object_loop_iteration_start_us != 0) {
+        g_mhs3_object_call_start_us = mhs3_steady_now_us();
+    }
 }
 
 void Hooks::mhs3_producer_object_loop_end(
@@ -1300,6 +1531,19 @@ void Hooks::mhs3_producer_object_loop_end(
 
     const auto now_us = mhs3_steady_now_us();
 
+    // Build #29:
+    // If helper_001000 was entered, this existing loop-end probe is also
+    // its return boundary.
+    if (
+        g_mhs3_object_call_start_us != 0 &&
+        now_us >= g_mhs3_object_call_start_us
+    ) {
+        g_mhs3_object_helper_001000_us +=
+            now_us - g_mhs3_object_call_start_us;
+
+        g_mhs3_object_call_start_us = 0;
+    }
+
     if (now_us >= start_us) {
         const auto elapsed_us = now_us - start_us;
 
@@ -1310,10 +1554,23 @@ void Hooks::mhs3_producer_object_loop_end(
             g_mhs3_object_loop_max_us = elapsed_us;
             g_mhs3_object_loop_max_object =
                 g_mhs3_object_loop_current_object;
+
+            g_mhs3_object_max_virtual18_us =
+                g_mhs3_object_virtual18_us;
+
+            g_mhs3_object_max_alt_virtual10_us =
+                g_mhs3_object_alt_virtual10_us;
+
+            g_mhs3_object_max_helper_ff180_us =
+                g_mhs3_object_helper_ff180_us;
+
+            g_mhs3_object_max_helper_001000_us =
+                g_mhs3_object_helper_001000_us;
         }
     }
 
     g_mhs3_object_loop_iteration_start_us = 0;
+    g_mhs3_object_call_start_us = 0;
 }
 
 void Hooks::mhs3_producer_p1(safetyhook::Context& context) {
@@ -1357,6 +1614,33 @@ void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
                     avg_us,
                     g_mhs3_object_loop_max_us,
                     g_mhs3_object_loop_max_object,
+                    GetCurrentThreadId()
+                );
+
+                const auto known_call_us =
+                    g_mhs3_object_max_virtual18_us +
+                    g_mhs3_object_max_alt_virtual10_us +
+                    g_mhs3_object_max_helper_ff180_us +
+                    g_mhs3_object_max_helper_001000_us;
+
+                const auto other_us =
+                    g_mhs3_object_loop_max_us >= known_call_us
+                        ? g_mhs3_object_loop_max_us - known_call_us
+                        : 0;
+
+                spdlog::warn(
+                    "[MHS3 OBJECT CALLS] "
+                    "iteration={} us object=0x{:x} "
+                    "virtual18={} us alt_virtual10={} us "
+                    "helper_ff180={} us helper_001000={} us "
+                    "other={} us tid={}",
+                    g_mhs3_object_loop_max_us,
+                    g_mhs3_object_loop_max_object,
+                    g_mhs3_object_max_virtual18_us,
+                    g_mhs3_object_max_alt_virtual10_us,
+                    g_mhs3_object_max_helper_ff180_us,
+                    g_mhs3_object_max_helper_001000_us,
+                    other_us,
                     GetCurrentThreadId()
                 );
             }

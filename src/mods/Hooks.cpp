@@ -863,6 +863,21 @@ std::atomic<uint64_t> g_mhs3_upstream_signal_epoch{0};
 std::atomic<uint64_t> g_mhs3_upstream_wake_us{0};
 std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
 
+// Build #27:
+// Time the actual Stage-A producer work.
+//
+// P0 = producer routine after prologue
+// P1 = initial setup/acquire complete
+// P2 = object-processing region complete
+// P3 = post-loop call group #1 complete
+// P4 = post-loop call group #2 complete
+// A  = SetEvent(+0x3a80)
+thread_local uint64_t g_mhs3_producer_p0_us = 0;
+thread_local uint64_t g_mhs3_producer_p1_us = 0;
+thread_local uint64_t g_mhs3_producer_p2_us = 0;
+thread_local uint64_t g_mhs3_producer_p3_us = 0;
+thread_local uint64_t g_mhs3_producer_p4_us = 0;
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1039,6 +1054,74 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         return "Failed to install MHS3 WaitRendering WaitB-after probe";
     }
 
+    // Build #27:
+    // Time the Stage-A producer itself instead of another wait primitive.
+    constexpr uintptr_t producer_p0_rva = 0x03fee50;
+    constexpr uintptr_t producer_p1_rva = 0x03fee6f;
+    constexpr uintptr_t producer_p2_rva = 0x03fef13;
+    constexpr uintptr_t producer_p3_rva = 0x03fef30;
+    constexpr uintptr_t producer_p4_rva = 0x03fef42;
+
+    m_mhs3_producer_p0_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_p0_rva),
+            &Hooks::mhs3_producer_p0
+        );
+
+    if (!m_mhs3_producer_p0_hook) {
+        return "Failed to install MHS3 producer P0 probe";
+    }
+
+    m_mhs3_producer_p1_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_p1_rva),
+            &Hooks::mhs3_producer_p1
+        );
+
+    if (!m_mhs3_producer_p1_hook) {
+        return "Failed to install MHS3 producer P1 probe";
+    }
+
+    m_mhs3_producer_p2_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_p2_rva),
+            &Hooks::mhs3_producer_p2
+        );
+
+    if (!m_mhs3_producer_p2_hook) {
+        return "Failed to install MHS3 producer P2 probe";
+    }
+
+    m_mhs3_producer_p3_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_p3_rva),
+            &Hooks::mhs3_producer_p3
+        );
+
+    if (!m_mhs3_producer_p3_hook) {
+        return "Failed to install MHS3 producer P3 probe";
+    }
+
+    m_mhs3_producer_p4_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_p4_rva),
+            &Hooks::mhs3_producer_p4
+        );
+
+    if (!m_mhs3_producer_p4_hook) {
+        return "Failed to install MHS3 producer P4 probe";
+    }
+
+    spdlog::info(
+        "[MHS3 PRODUCER TIMING] checkpoints installed: "
+        "P0=0x{:x} P1=0x{:x} P2=0x{:x} P3=0x{:x} P4=0x{:x}",
+        base + producer_p0_rva,
+        base + producer_p1_rva,
+        base + producer_p2_rva,
+        base + producer_p3_rva,
+        base + producer_p4_rva
+    );
+
     // Build #19:
     // Crash site from the Build #18 minidump:
     //
@@ -1129,6 +1212,48 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     );
 
     return std::nullopt;
+}
+
+void Hooks::mhs3_producer_p0(safetyhook::Context& context) {
+    (void)context;
+
+    g_mhs3_producer_p0_us = mhs3_steady_now_us();
+    g_mhs3_producer_p1_us = 0;
+    g_mhs3_producer_p2_us = 0;
+    g_mhs3_producer_p3_us = 0;
+    g_mhs3_producer_p4_us = 0;
+}
+
+void Hooks::mhs3_producer_p1(safetyhook::Context& context) {
+    (void)context;
+
+    if (g_mhs3_producer_p0_us != 0) {
+        g_mhs3_producer_p1_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
+    (void)context;
+
+    if (g_mhs3_producer_p0_us != 0) {
+        g_mhs3_producer_p2_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_p3(safetyhook::Context& context) {
+    (void)context;
+
+    if (g_mhs3_producer_p0_us != 0) {
+        g_mhs3_producer_p3_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_p4(safetyhook::Context& context) {
+    (void)context;
+
+    if (g_mhs3_producer_p0_us != 0) {
+        g_mhs3_producer_p4_us = mhs3_steady_now_us();
+    }
 }
 
 void Hooks::mhs3_wait_a_before(safetyhook::Context& context) {
@@ -1431,6 +1556,50 @@ BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
             (uintptr_t)event == upstream_handle
         ) {
             const auto now_us = mhs3_steady_now_us();
+
+            // Build #27:
+            // If this producer cycle was slow, break down where its
+            // pre-signal time actually went.
+            const auto p0 = g_mhs3_producer_p0_us;
+            const auto p1 = g_mhs3_producer_p1_us;
+            const auto p2 = g_mhs3_producer_p2_us;
+            const auto p3 = g_mhs3_producer_p3_us;
+            const auto p4 = g_mhs3_producer_p4_us;
+
+            if (
+                p0 != 0 &&
+                p1 >= p0 &&
+                p2 >= p1 &&
+                p3 >= p2 &&
+                p4 >= p3 &&
+                now_us >= p4
+            ) {
+                const auto total_us = now_us - p0;
+
+                if (total_us >= 50000) {
+                    spdlog::warn(
+                        "[MHS3 PRODUCER TIMING] "
+                        "total={} us setup={} us object_region={} us "
+                        "post_group1={} us post_group2={} us "
+                        "final_to_A={} us epoch={} tid={}",
+                        total_us,
+                        p1 - p0,
+                        p2 - p1,
+                        p3 - p2,
+                        p4 - p3,
+                        now_us - p4,
+                        upstream_epoch,
+                        GetCurrentThreadId()
+                    );
+                }
+            }
+
+            // Stage A completes this producer sample.
+            g_mhs3_producer_p0_us = 0;
+            g_mhs3_producer_p1_us = 0;
+            g_mhs3_producer_p2_us = 0;
+            g_mhs3_producer_p3_us = 0;
+            g_mhs3_producer_p4_us = 0;
 
             g_mhs3_upstream_signal_us.store(
                 now_us,

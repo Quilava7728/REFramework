@@ -1169,10 +1169,10 @@ void Hooks::mhs3_crash_state_probe(safetyhook::Context& context) {
 }
 
 DWORD WINAPI Hooks::mhs3_worker_wait_hook(HANDLE handle, DWORD timeout) {
-    using WorkerWaitFn = DWORD(WINAPI*)(HANDLE, DWORD);
-
     auto original =
-        g_hook->m_mhs3_worker_wait_hook->get_original<WorkerWaitFn>();
+        g_hook->m_mhs3_worker_wait_hook->get_original<
+            decltype(WaitForSingleObject)
+        >();
 
     const auto game_base =
         (uintptr_t)g_framework->get_module();

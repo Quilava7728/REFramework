@@ -878,6 +878,21 @@ thread_local uint64_t g_mhs3_producer_p2_us = 0;
 thread_local uint64_t g_mhs3_producer_p3_us = 0;
 thread_local uint64_t g_mhs3_producer_p4_us = 0;
 
+// Build #28:
+// Break the expensive P1 -> P2 object-processing region into individual
+// loop iterations.
+//
+// Loop entry = RVA 0x03fee8a
+// Loop end   = RVA 0x03fef06
+//
+// RBX at loop entry is the object being processed.
+thread_local uint64_t g_mhs3_object_loop_iteration_start_us = 0;
+thread_local uint64_t g_mhs3_object_loop_iteration_count = 0;
+thread_local uint64_t g_mhs3_object_loop_total_us = 0;
+thread_local uint64_t g_mhs3_object_loop_max_us = 0;
+thread_local uintptr_t g_mhs3_object_loop_current_object = 0;
+thread_local uintptr_t g_mhs3_object_loop_max_object = 0;
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1062,6 +1077,36 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_p3_rva = 0x03fef30;
     constexpr uintptr_t producer_p4_rva = 0x03fef42;
 
+    // Build #28: individual object-loop iteration timing.
+    constexpr uintptr_t producer_object_loop_begin_rva = 0x03fee8a;
+    constexpr uintptr_t producer_object_loop_end_rva   = 0x03fef06;
+
+    m_mhs3_producer_object_loop_begin_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_begin_rva),
+            &Hooks::mhs3_producer_object_loop_begin
+        );
+
+    if (!m_mhs3_producer_object_loop_begin_hook) {
+        return "Failed to install MHS3 producer object-loop begin probe";
+    }
+
+    m_mhs3_producer_object_loop_end_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_end_rva),
+            &Hooks::mhs3_producer_object_loop_end
+        );
+
+    if (!m_mhs3_producer_object_loop_end_hook) {
+        return "Failed to install MHS3 producer object-loop end probe";
+    }
+
+    spdlog::info(
+        "[MHS3 OBJECT LOOP] probes installed: begin=0x{:x} end=0x{:x}",
+        base + producer_object_loop_begin_rva,
+        base + producer_object_loop_end_rva
+    );
+
     m_mhs3_producer_p0_hook =
         safetyhook::create_mid(
             (void*)(base + producer_p0_rva),
@@ -1222,6 +1267,53 @@ void Hooks::mhs3_producer_p0(safetyhook::Context& context) {
     g_mhs3_producer_p2_us = 0;
     g_mhs3_producer_p3_us = 0;
     g_mhs3_producer_p4_us = 0;
+
+    g_mhs3_object_loop_iteration_start_us = 0;
+    g_mhs3_object_loop_iteration_count = 0;
+    g_mhs3_object_loop_total_us = 0;
+    g_mhs3_object_loop_max_us = 0;
+    g_mhs3_object_loop_current_object = 0;
+    g_mhs3_object_loop_max_object = 0;
+}
+
+void Hooks::mhs3_producer_object_loop_begin(
+    safetyhook::Context& context
+) {
+    if (g_mhs3_producer_p0_us == 0) {
+        return;
+    }
+
+    g_mhs3_object_loop_current_object = (uintptr_t)context.rbx;
+    g_mhs3_object_loop_iteration_start_us = mhs3_steady_now_us();
+}
+
+void Hooks::mhs3_producer_object_loop_end(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto start_us = g_mhs3_object_loop_iteration_start_us;
+
+    if (g_mhs3_producer_p0_us == 0 || start_us == 0) {
+        return;
+    }
+
+    const auto now_us = mhs3_steady_now_us();
+
+    if (now_us >= start_us) {
+        const auto elapsed_us = now_us - start_us;
+
+        ++g_mhs3_object_loop_iteration_count;
+        g_mhs3_object_loop_total_us += elapsed_us;
+
+        if (elapsed_us > g_mhs3_object_loop_max_us) {
+            g_mhs3_object_loop_max_us = elapsed_us;
+            g_mhs3_object_loop_max_object =
+                g_mhs3_object_loop_current_object;
+        }
+    }
+
+    g_mhs3_object_loop_iteration_start_us = 0;
 }
 
 void Hooks::mhs3_producer_p1(safetyhook::Context& context) {
@@ -1237,6 +1329,38 @@ void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
 
     if (g_mhs3_producer_p0_us != 0) {
         g_mhs3_producer_p2_us = mhs3_steady_now_us();
+
+        if (
+            g_mhs3_producer_p1_us != 0 &&
+            g_mhs3_producer_p2_us >= g_mhs3_producer_p1_us
+        ) {
+            const auto object_region_us =
+                g_mhs3_producer_p2_us - g_mhs3_producer_p1_us;
+
+            if (object_region_us >= 50000) {
+                const auto count =
+                    g_mhs3_object_loop_iteration_count;
+
+                const double avg_us =
+                    count != 0
+                        ? (double)g_mhs3_object_loop_total_us /
+                          (double)count
+                        : 0.0;
+
+                spdlog::warn(
+                    "[MHS3 OBJECT LOOP] "
+                    "region={} us iterations={} measured={} us "
+                    "avg={:.2f} us max={} us max_object=0x{:x} tid={}",
+                    object_region_us,
+                    count,
+                    g_mhs3_object_loop_total_us,
+                    avg_us,
+                    g_mhs3_object_loop_max_us,
+                    g_mhs3_object_loop_max_object,
+                    GetCurrentThreadId()
+                );
+            }
+        }
     }
 }
 

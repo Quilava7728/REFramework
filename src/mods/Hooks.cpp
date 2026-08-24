@@ -1165,6 +1165,38 @@ BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {
                     epoch,
                     std::memory_order_release
                 );
+
+                // Build #21:
+                // Identify the thread and callsite that finally signals the
+                // event currently blocking WaitA. Keep this strictly inside
+                // the matching-handle path so unrelated SetEvent traffic is
+                // not logged.
+                const auto return_address =
+                    (uintptr_t)_ReturnAddress();
+
+                const auto game_base =
+                    (uintptr_t)g_framework->get_module();
+
+                uintptr_t game_rva = 0;
+
+                if (
+                    return_address >= game_base &&
+                    game_base != 0
+                ) {
+                    game_rva = return_address - game_base;
+                }
+
+                spdlog::info(
+                    "[MHS3 WAITA SIGNALER] "
+                    "tid={} return_address=0x{:x} game_rva=0x{:x} "
+                    "wait_to_signal={} us epoch={} handle=0x{:x}",
+                    GetCurrentThreadId(),
+                    return_address,
+                    game_rva,
+                    elapsed_us,
+                    epoch,
+                    wait_a_handle
+                );
             }
         }
     }

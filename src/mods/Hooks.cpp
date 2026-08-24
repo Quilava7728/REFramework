@@ -600,6 +600,21 @@ std::atomic<uint64_t> g_mhs3_wait_a_start_us{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_epoch{0};
 std::atomic<uint64_t> g_mhs3_wait_a_signal_us{0};
 
+// Build #19:
+// Probe the crash site at RVA 0x237559. At this point the game has already
+// executed:
+//     mov 0x48(%rsi), %rax
+// but has NOT yet executed:
+//     vbroadcastss 0x34(%rax), %xmm7
+//
+// Therefore RAX is the exact +0x48 child pointer that was NULL in the
+// Build #18 crash, and observing it here requires no dereference of RAX.
+std::atomic<uint64_t> g_mhs3_crash_probe_calls{0};
+std::atomic<uint64_t> g_mhs3_crash_probe_null48{0};
+std::atomic<uintptr_t> g_mhs3_crash_probe_last_object{0};
+std::atomic<uintptr_t> g_mhs3_crash_probe_last_child40{0};
+std::atomic<uintptr_t> g_mhs3_crash_probe_last_child48{0};
+
 MHS3WaitCallsiteStats g_mhs3_wait_a_stats{};
 MHS3WaitCallsiteStats g_mhs3_wait_b_stats{};
 
@@ -687,6 +702,16 @@ void maybe_report_mhs3_wait_callsites() {
         g_mhs3_wait_b_stats.over_500ms
     );
 
+    spdlog::info(
+        "[MHS3 CRASH PROBE] calls={} null48={} "
+        "last_object=0x{:x} last_child40=0x{:x} last_child48=0x{:x}",
+        g_mhs3_crash_probe_calls.load(std::memory_order_acquire),
+        g_mhs3_crash_probe_null48.load(std::memory_order_acquire),
+        g_mhs3_crash_probe_last_object.load(std::memory_order_acquire),
+        g_mhs3_crash_probe_last_child40.load(std::memory_order_acquire),
+        g_mhs3_crash_probe_last_child48.load(std::memory_order_acquire)
+    );
+
     g_mhs3_wait_a_stats = {};
     g_mhs3_wait_b_stats = {};
     g_mhs3_wait_last_report = now;
@@ -751,6 +776,32 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         return "Failed to install MHS3 WaitRendering WaitB-after probe";
     }
 
+    // Build #19:
+    // Crash site from the Build #18 minidump:
+    //
+    //   140237555  mov 0x48(%rsi), %rax
+    //   140237559  vbroadcastss 0x34(%rax), %xmm7   <-- crashed here
+    //
+    // Hooking at 0x237559 lets us inspect RAX after the +0x48 load but
+    // before the game dereferences it.
+    constexpr uintptr_t crash_state_probe_rva = 0x237559;
+    const auto crash_state_probe = base + crash_state_probe_rva;
+
+    m_mhs3_crash_state_hook =
+        safetyhook::create_mid(
+            (void*)crash_state_probe,
+            &Hooks::mhs3_crash_state_probe
+        );
+
+    if (!m_mhs3_crash_state_hook) {
+        return "Failed to install MHS3 crash-state +0x48 probe";
+    }
+
+    spdlog::info(
+        "[MHS3 CRASH PROBE] installed at 0x{:x}",
+        crash_state_probe
+    );
+
     // Build #18:
     // Hook the actual runtime SetEvent export instead of guessing at an
     // executable-side thunk. Under Proton/Wine this resolves to the real
@@ -807,6 +858,46 @@ void Hooks::mhs3_wait_a_before(safetyhook::Context& context) {
     g_mhs3_wait_a_signal_us.store(0, std::memory_order_release);
 
     (void)epoch;
+}
+
+void Hooks::mhs3_crash_state_probe(safetyhook::Context& context) {
+    const auto object = (uintptr_t)context.rsi;
+    const auto child40 = (uintptr_t)context.rcx;
+    const auto child48 = (uintptr_t)context.rax;
+
+    g_mhs3_crash_probe_calls.fetch_add(1, std::memory_order_relaxed);
+    g_mhs3_crash_probe_last_object.store(object, std::memory_order_release);
+    g_mhs3_crash_probe_last_child40.store(child40, std::memory_order_release);
+    g_mhs3_crash_probe_last_child48.store(child48, std::memory_order_release);
+
+    if (child48 != 0) {
+        return;
+    }
+
+    g_mhs3_crash_probe_null48.fetch_add(1, std::memory_order_relaxed);
+
+    const auto now_us = mhs3_steady_now_us();
+    const auto wait_start_us =
+        g_mhs3_wait_a_start_us.load(std::memory_order_acquire);
+
+    uint64_t outstanding_wait_us = 0;
+
+    if (wait_start_us != 0 && now_us >= wait_start_us) {
+        outstanding_wait_us = now_us - wait_start_us;
+    }
+
+    spdlog::warn(
+        "[MHS3 CRASH PROBE] NULL +0x48 BEFORE CRASH "
+        "tid={} object=0x{:x} child40=0x{:x} child48=0x{:x} "
+        "waitA_outstanding={} us waitA_epoch={} handle=0x{:x}",
+        GetCurrentThreadId(),
+        object,
+        child40,
+        child48,
+        outstanding_wait_us,
+        g_mhs3_wait_a_epoch.load(std::memory_order_acquire),
+        g_mhs3_wait_a_handle.load(std::memory_order_acquire)
+    );
 }
 
 BOOL WINAPI Hooks::mhs3_setevent_hook(HANDLE event) {

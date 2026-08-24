@@ -424,6 +424,242 @@ struct MHS3EntryCadenceStats {
     uint64_t original_max_us{0};
 };
 
+// Build #20:
+// Measure wall-clock time BETWEEN selected via.Application stages.
+// Build #19 showed that the individual stage functions could be fast while
+// the same-stage frame cadence still contained ~70-80 ms gaps.
+//
+// These four transitions split one selected frame cycle into:
+//   UpdateBehavior -> PrepareRendering
+//   PrepareRendering -> WaitRendering
+//   WaitRendering -> BeginRendering
+//   BeginRendering -> next UpdateBehavior
+enum class MHS3CrossStage : uint8_t {
+    None = 0,
+    UpdateBehavior,
+    PrepareRendering,
+    WaitRendering,
+    BeginRendering
+};
+
+struct MHS3CrossStageStats {
+    std::atomic<uint64_t> calls{0};
+    std::atomic<uint64_t> total_us{0};
+    std::atomic<uint64_t> max_us{0};
+    std::atomic<uint64_t> over_50ms{0};
+    std::atomic<uint64_t> over_100ms{0};
+    std::atomic<uint64_t> over_200ms{0};
+    std::atomic<uint64_t> over_500ms{0};
+};
+
+MHS3CrossStageStats g_mhs3_cross_update_to_prepare{};
+MHS3CrossStageStats g_mhs3_cross_prepare_to_wait{};
+MHS3CrossStageStats g_mhs3_cross_wait_to_begin{};
+MHS3CrossStageStats g_mhs3_cross_begin_to_update{};
+
+std::atomic<uint64_t> g_mhs3_cross_last_report_us{0};
+
+thread_local MHS3CrossStage g_mhs3_cross_last_stage = MHS3CrossStage::None;
+thread_local uint64_t g_mhs3_cross_last_stage_us = 0;
+
+static uint64_t mhs3_cross_now_us() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
+
+static void mhs3_cross_update_max(
+    std::atomic<uint64_t>& target,
+    uint64_t value
+) {
+    auto old = target.load(std::memory_order_relaxed);
+
+    while (
+        value > old &&
+        !target.compare_exchange_weak(
+            old,
+            value,
+            std::memory_order_relaxed,
+            std::memory_order_relaxed
+        )
+    ) {
+    }
+}
+
+static void mhs3_cross_record_duration(
+    MHS3CrossStageStats& stats,
+    uint64_t elapsed_us
+) {
+    stats.calls.fetch_add(1, std::memory_order_relaxed);
+    stats.total_us.fetch_add(elapsed_us, std::memory_order_relaxed);
+    mhs3_cross_update_max(stats.max_us, elapsed_us);
+
+    if (elapsed_us >= 50000) {
+        stats.over_50ms.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if (elapsed_us >= 100000) {
+        stats.over_100ms.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if (elapsed_us >= 200000) {
+        stats.over_200ms.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if (elapsed_us >= 500000) {
+        stats.over_500ms.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+struct MHS3CrossStageSnapshot {
+    uint64_t calls{};
+    uint64_t total_us{};
+    uint64_t max_us{};
+    uint64_t over_50ms{};
+    uint64_t over_100ms{};
+    uint64_t over_200ms{};
+    uint64_t over_500ms{};
+};
+
+static MHS3CrossStageSnapshot mhs3_cross_take_snapshot(
+    MHS3CrossStageStats& stats
+) {
+    MHS3CrossStageSnapshot out{};
+
+    out.calls = stats.calls.exchange(0, std::memory_order_relaxed);
+    out.total_us = stats.total_us.exchange(0, std::memory_order_relaxed);
+    out.max_us = stats.max_us.exchange(0, std::memory_order_relaxed);
+    out.over_50ms = stats.over_50ms.exchange(0, std::memory_order_relaxed);
+    out.over_100ms = stats.over_100ms.exchange(0, std::memory_order_relaxed);
+    out.over_200ms = stats.over_200ms.exchange(0, std::memory_order_relaxed);
+    out.over_500ms = stats.over_500ms.exchange(0, std::memory_order_relaxed);
+
+    return out;
+}
+
+static void mhs3_cross_log_snapshot(
+    const char* name,
+    const MHS3CrossStageSnapshot& stats
+) {
+    const double avg_us =
+        stats.calls > 0
+            ? (double)stats.total_us / (double)stats.calls
+            : 0.0;
+
+    spdlog::info(
+        "[MHS3 CROSS] {} calls={} avg={:.2f} us max={} us "
+        ">50ms={} >100ms={} >200ms={} >500ms={}",
+        name,
+        stats.calls,
+        avg_us,
+        stats.max_us,
+        stats.over_50ms,
+        stats.over_100ms,
+        stats.over_200ms,
+        stats.over_500ms
+    );
+}
+
+static void record_mhs3_cross_stage(MHS3CrossStage current) {
+    const auto now_us = mhs3_cross_now_us();
+
+    if (
+        g_mhs3_cross_last_stage != MHS3CrossStage::None &&
+        g_mhs3_cross_last_stage_us != 0 &&
+        now_us >= g_mhs3_cross_last_stage_us
+    ) {
+        const auto elapsed_us = now_us - g_mhs3_cross_last_stage_us;
+
+        if (
+            g_mhs3_cross_last_stage == MHS3CrossStage::UpdateBehavior &&
+            current == MHS3CrossStage::PrepareRendering
+        ) {
+            mhs3_cross_record_duration(
+                g_mhs3_cross_update_to_prepare,
+                elapsed_us
+            );
+        }
+        else if (
+            g_mhs3_cross_last_stage == MHS3CrossStage::PrepareRendering &&
+            current == MHS3CrossStage::WaitRendering
+        ) {
+            mhs3_cross_record_duration(
+                g_mhs3_cross_prepare_to_wait,
+                elapsed_us
+            );
+        }
+        else if (
+            g_mhs3_cross_last_stage == MHS3CrossStage::WaitRendering &&
+            current == MHS3CrossStage::BeginRendering
+        ) {
+            mhs3_cross_record_duration(
+                g_mhs3_cross_wait_to_begin,
+                elapsed_us
+            );
+        }
+        else if (
+            g_mhs3_cross_last_stage == MHS3CrossStage::BeginRendering &&
+            current == MHS3CrossStage::UpdateBehavior
+        ) {
+            mhs3_cross_record_duration(
+                g_mhs3_cross_begin_to_update,
+                elapsed_us
+            );
+        }
+    }
+
+    g_mhs3_cross_last_stage = current;
+    g_mhs3_cross_last_stage_us = now_us;
+
+    auto last_report =
+        g_mhs3_cross_last_report_us.load(std::memory_order_relaxed);
+
+    if (last_report == 0) {
+        g_mhs3_cross_last_report_us.compare_exchange_strong(
+            last_report,
+            now_us,
+            std::memory_order_relaxed,
+            std::memory_order_relaxed
+        );
+        return;
+    }
+
+    if (now_us - last_report < 5000000) {
+        return;
+    }
+
+    if (
+        !g_mhs3_cross_last_report_us.compare_exchange_strong(
+            last_report,
+            now_us,
+            std::memory_order_relaxed,
+            std::memory_order_relaxed
+        )
+    ) {
+        return;
+    }
+
+    mhs3_cross_log_snapshot(
+        "UpdateBehavior->PrepareRendering",
+        mhs3_cross_take_snapshot(g_mhs3_cross_update_to_prepare)
+    );
+
+    mhs3_cross_log_snapshot(
+        "PrepareRendering->WaitRendering",
+        mhs3_cross_take_snapshot(g_mhs3_cross_prepare_to_wait)
+    );
+
+    mhs3_cross_log_snapshot(
+        "WaitRendering->BeginRendering",
+        mhs3_cross_take_snapshot(g_mhs3_cross_wait_to_begin)
+    );
+
+    mhs3_cross_log_snapshot(
+        "BeginRendering->UpdateBehavior",
+        mhs3_cross_take_snapshot(g_mhs3_cross_begin_to_update)
+    );
+}
+
 void run_mhs3_entry_cadence(
     const char* name,
     void* entry,
@@ -1011,6 +1247,7 @@ void Hooks::mhs3_wait_b_after(safetyhook::Context& context) {
 }
 
 void Hooks::update_behavior_hook_internal(void* entry) {
+    record_mhs3_cross_stage(MHS3CrossStage::UpdateBehavior);
     static MHS3EntryCadenceStats stats{};
 
     run_mhs3_entry_cadence(
@@ -1026,6 +1263,7 @@ void Hooks::update_behavior_hook(void* entry) {
 }
 
 void Hooks::prepare_rendering_hook_internal(void* entry) {
+    record_mhs3_cross_stage(MHS3CrossStage::PrepareRendering);
     static MHS3EntryCadenceStats stats{};
 
     run_mhs3_entry_cadence(
@@ -1041,6 +1279,7 @@ void Hooks::prepare_rendering_hook(void* entry) {
 }
 
 void Hooks::mhs3_wait_rendering_hook_internal(void* entry) {
+    record_mhs3_cross_stage(MHS3CrossStage::WaitRendering);
     static MHS3EntryCadenceStats stats{};
 
     run_mhs3_entry_cadence(
@@ -1056,6 +1295,7 @@ void Hooks::mhs3_wait_rendering_hook(void* entry) {
 }
 
 void Hooks::begin_rendering_hook_internal(void* entry) {
+    record_mhs3_cross_stage(MHS3CrossStage::BeginRendering);
     if (m_begin_rendering_original == nullptr) {
         return;
     }

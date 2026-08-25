@@ -872,6 +872,14 @@ std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
 // P3 = post-loop call group #1 complete
 // P4 = post-loop call group #2 complete
 // A  = SetEvent(+0x3a80)
+// Build #31G:
+// Minimal object-loop timing bookkeeping.
+// Thread-local so independent producer threads never share a timing pair.
+thread_local uint64_t g_mhs3_object_loop_begin_us = 0;
+thread_local uint64_t g_mhs3_object_loop_count = 0;
+thread_local uint64_t g_mhs3_object_loop_total_us = 0;
+thread_local uint64_t g_mhs3_object_loop_max_us = 0;
+
 thread_local uint64_t g_mhs3_producer_p0_us = 0;
 thread_local uint64_t g_mhs3_producer_p1_us = 0;
 thread_local uint64_t g_mhs3_producer_p2_us = 0;
@@ -1062,6 +1070,38 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_p3_rva = 0x03fef30;
     constexpr uintptr_t producer_p4_rva = 0x03fef42;
 
+    // BUILD31G:
+    // Paired timing plus count/total/max bookkeeping.
+    constexpr uintptr_t producer_object_loop_begin_bookkeeping_rva = 0x03fee8a;
+    constexpr uintptr_t producer_object_loop_end_bookkeeping_rva   = 0x03fef06;
+
+    m_mhs3_producer_object_loop_begin_bookkeeping_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_begin_bookkeeping_rva),
+            &Hooks::mhs3_producer_object_loop_begin_bookkeeping
+        );
+
+    if (!m_mhs3_producer_object_loop_begin_bookkeeping_hook) {
+        return "Failed to install MHS3 Build #31G begin-bookkeeping probe";
+    }
+
+    m_mhs3_producer_object_loop_end_bookkeeping_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_end_bookkeeping_rva),
+            &Hooks::mhs3_producer_object_loop_end_bookkeeping
+        );
+
+    if (!m_mhs3_producer_object_loop_end_bookkeeping_hook) {
+        return "Failed to install MHS3 Build #31G end-bookkeeping probe";
+    }
+
+    spdlog::info(
+        "[MHS3 BUILD31G] object-loop bookkeeping probes installed: "
+        "begin=0x{:x} end=0x{:x}",
+        base + producer_object_loop_begin_bookkeeping_rva,
+        base + producer_object_loop_end_bookkeeping_rva
+    );
+
     m_mhs3_producer_p0_hook =
         safetyhook::create_mid(
             (void*)(base + producer_p0_rva),
@@ -1212,6 +1252,37 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     );
 
     return std::nullopt;
+}
+
+void Hooks::mhs3_producer_object_loop_begin_bookkeeping(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    g_mhs3_object_loop_begin_us =
+        mhs3_steady_now_us();
+}
+
+void Hooks::mhs3_producer_object_loop_end_bookkeeping(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto end_us = mhs3_steady_now_us();
+    const auto begin_us = g_mhs3_object_loop_begin_us;
+
+    if (begin_us == 0 || end_us < begin_us) {
+        return;
+    }
+
+    const auto elapsed_us = end_us - begin_us;
+
+    ++g_mhs3_object_loop_count;
+    g_mhs3_object_loop_total_us += elapsed_us;
+
+    if (elapsed_us > g_mhs3_object_loop_max_us) {
+        g_mhs3_object_loop_max_us = elapsed_us;
+    }
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

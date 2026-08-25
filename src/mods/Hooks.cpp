@@ -893,6 +893,14 @@ thread_local uint64_t g_mhs3_object_loop_max_us = 0;
 thread_local uintptr_t g_mhs3_object_loop_current_object = 0;
 thread_local uintptr_t g_mhs3_object_loop_max_object = 0;
 
+// Build #30:
+// Capture the actual vtable target used by call *0x18(%rax) for each
+// object iteration without placing any new hook on the callsite itself.
+thread_local uintptr_t g_mhs3_object_loop_current_vtable = 0;
+thread_local uintptr_t g_mhs3_object_loop_current_virtual18 = 0;
+thread_local uintptr_t g_mhs3_object_loop_max_vtable = 0;
+thread_local uintptr_t g_mhs3_object_loop_max_virtual18 = 0;
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1274,6 +1282,11 @@ void Hooks::mhs3_producer_p0(safetyhook::Context& context) {
     g_mhs3_object_loop_max_us = 0;
     g_mhs3_object_loop_current_object = 0;
     g_mhs3_object_loop_max_object = 0;
+
+    g_mhs3_object_loop_current_vtable = 0;
+    g_mhs3_object_loop_current_virtual18 = 0;
+    g_mhs3_object_loop_max_vtable = 0;
+    g_mhs3_object_loop_max_virtual18 = 0;
 }
 
 void Hooks::mhs3_producer_object_loop_begin(
@@ -1285,6 +1298,25 @@ void Hooks::mhs3_producer_object_loop_begin(
 
     g_mhs3_object_loop_current_object = (uintptr_t)context.rbx;
     g_mhs3_object_loop_iteration_start_us = mhs3_steady_now_us();
+
+    g_mhs3_object_loop_current_vtable = 0;
+    g_mhs3_object_loop_current_virtual18 = 0;
+
+    const auto object =
+        g_mhs3_object_loop_current_object;
+
+    if (object != 0) {
+        const auto vtable =
+            *(uintptr_t*)object;
+
+        g_mhs3_object_loop_current_vtable =
+            vtable;
+
+        if (vtable != 0) {
+            g_mhs3_object_loop_current_virtual18 =
+                *(uintptr_t*)(vtable + 0x18);
+        }
+    }
 }
 
 void Hooks::mhs3_producer_object_loop_end(
@@ -1310,6 +1342,12 @@ void Hooks::mhs3_producer_object_loop_end(
             g_mhs3_object_loop_max_us = elapsed_us;
             g_mhs3_object_loop_max_object =
                 g_mhs3_object_loop_current_object;
+
+            g_mhs3_object_loop_max_vtable =
+                g_mhs3_object_loop_current_vtable;
+
+            g_mhs3_object_loop_max_virtual18 =
+                g_mhs3_object_loop_current_virtual18;
         }
     }
 
@@ -1357,6 +1395,17 @@ void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
                     avg_us,
                     g_mhs3_object_loop_max_us,
                     g_mhs3_object_loop_max_object,
+                    GetCurrentThreadId()
+                );
+
+                spdlog::warn(
+                    "[MHS3 VIRTUAL TARGET] "
+                    "iteration={} us object=0x{:x} "
+                    "vtable=0x{:x} virtual18=0x{:x} tid={}",
+                    g_mhs3_object_loop_max_us,
+                    g_mhs3_object_loop_max_object,
+                    g_mhs3_object_loop_max_vtable,
+                    g_mhs3_object_loop_max_virtual18,
                     GetCurrentThreadId()
                 );
             }

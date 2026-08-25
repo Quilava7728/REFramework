@@ -893,6 +893,12 @@ thread_local uint64_t g_mhs3_object_loop_max_us = 0;
 thread_local uintptr_t g_mhs3_object_loop_current_object = 0;
 thread_local uintptr_t g_mhs3_object_loop_max_object = 0;
 
+// Build #29B:
+// Time only the first per-object virtual call at RVA 0x03fee9a.
+thread_local uint64_t g_mhs3_virtual18_start_us = 0;
+thread_local uint64_t g_mhs3_virtual18_current_us = 0;
+thread_local uint64_t g_mhs3_virtual18_max_iteration_us = 0;
+
 // Build #19:
 // Probe the crash site at RVA 0x237559. At this point the game has already
 // executed:
@@ -1080,6 +1086,38 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     // Build #28: individual object-loop iteration timing.
     constexpr uintptr_t producer_object_loop_begin_rva = 0x03fee8a;
     constexpr uintptr_t producer_object_loop_end_rva   = 0x03fef06;
+
+    // Build #29B: one surgical call-timing pair only.
+    constexpr uintptr_t producer_virtual18_before_rva = 0x03fee9a;
+    constexpr uintptr_t producer_virtual18_after_rva  = 0x03fee9d;
+
+    // Build #29B:
+    // Deliberately install only one before/after pair inside the hot loop.
+    m_mhs3_producer_virtual18_before_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_virtual18_before_rva),
+            &Hooks::mhs3_producer_virtual18_before
+        );
+
+    if (!m_mhs3_producer_virtual18_before_hook) {
+        return "Failed to install MHS3 virtual18-before probe";
+    }
+
+    m_mhs3_producer_virtual18_after_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_virtual18_after_rva),
+            &Hooks::mhs3_producer_virtual18_after
+        );
+
+    if (!m_mhs3_producer_virtual18_after_hook) {
+        return "Failed to install MHS3 virtual18-after probe";
+    }
+
+    spdlog::info(
+        "[MHS3 VIRTUAL18] probes installed: 0x{:x}->0x{:x}",
+        base + producer_virtual18_before_rva,
+        base + producer_virtual18_after_rva
+    );
 
     m_mhs3_producer_object_loop_begin_hook =
         safetyhook::create_mid(
@@ -1274,6 +1312,10 @@ void Hooks::mhs3_producer_p0(safetyhook::Context& context) {
     g_mhs3_object_loop_max_us = 0;
     g_mhs3_object_loop_current_object = 0;
     g_mhs3_object_loop_max_object = 0;
+
+    g_mhs3_virtual18_start_us = 0;
+    g_mhs3_virtual18_current_us = 0;
+    g_mhs3_virtual18_max_iteration_us = 0;
 }
 
 void Hooks::mhs3_producer_object_loop_begin(
@@ -1285,6 +1327,38 @@ void Hooks::mhs3_producer_object_loop_begin(
 
     g_mhs3_object_loop_current_object = (uintptr_t)context.rbx;
     g_mhs3_object_loop_iteration_start_us = mhs3_steady_now_us();
+
+    g_mhs3_virtual18_start_us = 0;
+    g_mhs3_virtual18_current_us = 0;
+}
+
+void Hooks::mhs3_producer_virtual18_before(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    if (g_mhs3_object_loop_iteration_start_us != 0) {
+        g_mhs3_virtual18_start_us = mhs3_steady_now_us();
+    }
+}
+
+void Hooks::mhs3_producer_virtual18_after(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto start_us = g_mhs3_virtual18_start_us;
+
+    if (start_us != 0) {
+        const auto now_us = mhs3_steady_now_us();
+
+        if (now_us >= start_us) {
+            g_mhs3_virtual18_current_us =
+                now_us - start_us;
+        }
+    }
+
+    g_mhs3_virtual18_start_us = 0;
 }
 
 void Hooks::mhs3_producer_object_loop_end(
@@ -1310,6 +1384,9 @@ void Hooks::mhs3_producer_object_loop_end(
             g_mhs3_object_loop_max_us = elapsed_us;
             g_mhs3_object_loop_max_object =
                 g_mhs3_object_loop_current_object;
+
+            g_mhs3_virtual18_max_iteration_us =
+                g_mhs3_virtual18_current_us;
         }
     }
 
@@ -1357,6 +1434,24 @@ void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
                     avg_us,
                     g_mhs3_object_loop_max_us,
                     g_mhs3_object_loop_max_object,
+                    GetCurrentThreadId()
+                );
+
+                const auto other_us =
+                    g_mhs3_object_loop_max_us >=
+                        g_mhs3_virtual18_max_iteration_us
+                        ? g_mhs3_object_loop_max_us -
+                            g_mhs3_virtual18_max_iteration_us
+                        : 0;
+
+                spdlog::warn(
+                    "[MHS3 VIRTUAL18] "
+                    "iteration={} us object=0x{:x} "
+                    "virtual18={} us other={} us tid={}",
+                    g_mhs3_object_loop_max_us,
+                    g_mhs3_object_loop_max_object,
+                    g_mhs3_virtual18_max_iteration_us,
+                    other_us,
                     GetCurrentThreadId()
                 );
             }

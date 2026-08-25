@@ -1062,6 +1062,38 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_p3_rva = 0x03fef30;
     constexpr uintptr_t producer_p4_rva = 0x03fef42;
 
+    // BUILD31C:
+    // Test both Build #28 object-loop hook locations simultaneously.
+    // Callbacks intentionally do no timing, no state capture, no dereference.
+    constexpr uintptr_t producer_object_loop_begin_empty_rva = 0x03fee8a;
+    constexpr uintptr_t producer_object_loop_end_empty_rva   = 0x03fef06;
+
+    m_mhs3_producer_object_loop_begin_empty_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_begin_empty_rva),
+            &Hooks::mhs3_producer_object_loop_begin_empty
+        );
+
+    if (!m_mhs3_producer_object_loop_begin_empty_hook) {
+        return "Failed to install MHS3 Build #31C object-loop begin probe";
+    }
+
+    m_mhs3_producer_object_loop_end_empty_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_end_empty_rva),
+            &Hooks::mhs3_producer_object_loop_end_empty
+        );
+
+    if (!m_mhs3_producer_object_loop_end_empty_hook) {
+        return "Failed to install MHS3 Build #31C object-loop end probe";
+    }
+
+    spdlog::info(
+        "[MHS3 BUILD31C] object-loop empty probes installed: begin=0x{:x} end=0x{:x}",
+        base + producer_object_loop_begin_empty_rva,
+        base + producer_object_loop_end_empty_rva
+    );
+
     m_mhs3_producer_p0_hook =
         safetyhook::create_mid(
             (void*)(base + producer_p0_rva),
@@ -1212,6 +1244,18 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     );
 
     return std::nullopt;
+}
+
+void Hooks::mhs3_producer_object_loop_begin_empty(
+    safetyhook::Context& context
+) {
+    (void)context;
+}
+
+void Hooks::mhs3_producer_object_loop_end_empty(
+    safetyhook::Context& context
+) {
+    (void)context;
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

@@ -872,6 +872,11 @@ std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
 // P3 = post-loop call group #1 complete
 // P4 = post-loop call group #2 complete
 // A  = SetEvent(+0x3a80)
+// Build #31G3:
+// Proven timing state plus one independent TLS marker.
+thread_local uint64_t g_mhs3_object_loop_begin_us = 0;
+thread_local uint64_t g_mhs3_object_loop_marker = 0;
+
 thread_local uint64_t g_mhs3_producer_p0_us = 0;
 thread_local uint64_t g_mhs3_producer_p1_us = 0;
 thread_local uint64_t g_mhs3_producer_p2_us = 0;
@@ -1062,6 +1067,38 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_p3_rva = 0x03fef30;
     constexpr uintptr_t producer_p4_rva = 0x03fef42;
 
+    // BUILD31G3:
+    // Proven elapsed timing plus one extra TLS store.
+    constexpr uintptr_t producer_object_loop_begin_tls_store_rva = 0x03fee8a;
+    constexpr uintptr_t producer_object_loop_end_tls_store_rva   = 0x03fef06;
+
+    m_mhs3_producer_object_loop_begin_tls_store_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_begin_tls_store_rva),
+            &Hooks::mhs3_producer_object_loop_begin_tls_store
+        );
+
+    if (!m_mhs3_producer_object_loop_begin_tls_store_hook) {
+        return "Failed to install MHS3 Build #31G3 begin TLS-store probe";
+    }
+
+    m_mhs3_producer_object_loop_end_tls_store_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_end_tls_store_rva),
+            &Hooks::mhs3_producer_object_loop_end_tls_store
+        );
+
+    if (!m_mhs3_producer_object_loop_end_tls_store_hook) {
+        return "Failed to install MHS3 Build #31G3 end TLS-store probe";
+    }
+
+    spdlog::info(
+        "[MHS3 BUILD31G3] object-loop TLS-store probes installed: "
+        "begin=0x{:x} end=0x{:x}",
+        base + producer_object_loop_begin_tls_store_rva,
+        base + producer_object_loop_end_tls_store_rva
+    );
+
     m_mhs3_producer_p0_hook =
         safetyhook::create_mid(
             (void*)(base + producer_p0_rva),
@@ -1212,6 +1249,33 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     );
 
     return std::nullopt;
+}
+
+void Hooks::mhs3_producer_object_loop_begin_tls_store(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    g_mhs3_object_loop_begin_us =
+        mhs3_steady_now_us();
+}
+
+void Hooks::mhs3_producer_object_loop_end_tls_store(
+    safetyhook::Context& context
+) {
+    (void)context;
+
+    const auto end_us = mhs3_steady_now_us();
+    const auto begin_us = g_mhs3_object_loop_begin_us;
+
+    if (begin_us == 0 || end_us < begin_us) {
+        return;
+    }
+
+    const auto elapsed_us = end_us - begin_us;
+    (void)elapsed_us;
+
+    g_mhs3_object_loop_marker = 1;
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

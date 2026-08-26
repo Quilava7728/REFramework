@@ -117,6 +117,15 @@ private:
     static void mhs3_crash_state_probe(safetyhook::Context& context);
 
     // Build #27: producer timing checkpoints before Stage A.
+    // Build #31G3:
+    // Proven elapsed timing plus one TLS store only.
+    static void mhs3_producer_object_loop_begin_tls_store(
+        safetyhook::Context& context
+    );
+    static void mhs3_producer_object_loop_end_tls_store(
+        safetyhook::Context& context
+    );
+
     static void mhs3_producer_p0(safetyhook::Context& context);
     static void mhs3_producer_p1(safetyhook::Context& context);
     static void mhs3_producer_p2(safetyhook::Context& context);
@@ -193,6 +202,10 @@ protected:
     safetyhook::MidHook m_mhs3_crash_state_hook{};
 
     // Build #27: Stage-A producer timing checkpoints.
+    // Build #31G3.
+    safetyhook::MidHook m_mhs3_producer_object_loop_begin_tls_store_hook{};
+    safetyhook::MidHook m_mhs3_producer_object_loop_end_tls_store_hook{};
+
     safetyhook::MidHook m_mhs3_producer_p0_hook{};
     safetyhook::MidHook m_mhs3_producer_p1_hook{};
     safetyhook::MidHook m_mhs3_producer_p2_hook{};

@@ -1062,6 +1062,38 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_p3_rva = 0x03fef30;
     constexpr uintptr_t producer_p4_rva = 0x03fef42;
 
+    // BUILD31G2:
+    // Combat-test both known hook sites with completely empty callbacks.
+    constexpr uintptr_t producer_object_loop_begin_noop_rva = 0x03fee8a;
+    constexpr uintptr_t producer_object_loop_end_noop_rva   = 0x03fef06;
+
+    m_mhs3_producer_object_loop_begin_noop_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_begin_noop_rva),
+            &Hooks::mhs3_producer_object_loop_begin_noop
+        );
+
+    if (!m_mhs3_producer_object_loop_begin_noop_hook) {
+        return "Failed to install MHS3 Build #31G2 begin-noop probe";
+    }
+
+    m_mhs3_producer_object_loop_end_noop_hook =
+        safetyhook::create_mid(
+            (void*)(base + producer_object_loop_end_noop_rva),
+            &Hooks::mhs3_producer_object_loop_end_noop
+        );
+
+    if (!m_mhs3_producer_object_loop_end_noop_hook) {
+        return "Failed to install MHS3 Build #31G2 end-noop probe";
+    }
+
+    spdlog::info(
+        "[MHS3 BUILD31G2] object-loop no-op probes installed: "
+        "begin=0x{:x} end=0x{:x}",
+        base + producer_object_loop_begin_noop_rva,
+        base + producer_object_loop_end_noop_rva
+    );
+
     m_mhs3_producer_p0_hook =
         safetyhook::create_mid(
             (void*)(base + producer_p0_rva),
@@ -1212,6 +1244,18 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     );
 
     return std::nullopt;
+}
+
+void Hooks::mhs3_producer_object_loop_begin_noop(
+    safetyhook::Context& context
+) {
+    (void)context;
+}
+
+void Hooks::mhs3_producer_object_loop_end_noop(
+    safetyhook::Context& context
+) {
+    (void)context;
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

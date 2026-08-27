@@ -877,6 +877,11 @@ std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
 thread_local uint64_t g_mhs3_object_loop_begin_us = 0;
 thread_local uint64_t g_mhs3_object_loop_marker = 0;
 
+// Observation build:
+// Publish the completed object-loop duration only after leaving the measured
+// region. The hot object-loop end callback remains identical to Build #31G6.
+std::atomic<uint64_t> g_mhs3_object_loop_latest_us{0};
+
 thread_local uint64_t g_mhs3_producer_p0_us = 0;
 thread_local uint64_t g_mhs3_producer_p1_us = 0;
 thread_local uint64_t g_mhs3_producer_p2_us = 0;
@@ -993,6 +998,11 @@ void maybe_report_mhs3_wait_callsites() {
         g_mhs3_crash_probe_last_object.load(std::memory_order_acquire),
         g_mhs3_crash_probe_last_child40.load(std::memory_order_acquire),
         g_mhs3_crash_probe_last_child48.load(std::memory_order_acquire)
+    );
+
+    spdlog::info(
+        "[MHS3 OBJECT LOOP] latest={} us",
+        g_mhs3_object_loop_latest_us.load(std::memory_order_relaxed)
     );
 
     g_mhs3_wait_a_stats = {};
@@ -1301,6 +1311,11 @@ void Hooks::mhs3_producer_p2(safetyhook::Context& context) {
     if (g_mhs3_producer_p0_us != 0) {
         g_mhs3_producer_p2_us = mhs3_steady_now_us();
     }
+
+    g_mhs3_object_loop_latest_us.store(
+        g_mhs3_object_loop_marker,
+        std::memory_order_relaxed
+    );
 }
 
 void Hooks::mhs3_producer_p3(safetyhook::Context& context) {

@@ -876,6 +876,7 @@ std::atomic<uint64_t> g_mhs3_upstream_wake_epoch{0};
 // Minimal paired timing plus marker = elapsed_us only.
 thread_local uint64_t g_mhs3_object_loop_begin_us = 0;
 thread_local uint64_t g_mhs3_object_loop_marker = 0;
+thread_local uint64_t g_mhs3_object_loop_entry = 0;
 
 // Observation build:
 // Publish the completed object-loop duration only after leaving the measured
@@ -1285,6 +1286,7 @@ void Hooks::mhs3_producer_object_loop_end_marker_direct_elapsed(
     const auto elapsed_us = end_us - begin_us;
 
     g_mhs3_object_loop_marker = elapsed_us;
+    g_mhs3_object_loop_entry = context.r15;
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

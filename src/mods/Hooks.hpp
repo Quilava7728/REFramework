@@ -126,6 +126,9 @@ private:
         safetyhook::Context& context
     );
 
+    // Build #32: one-shot F41CE0 object census.
+    static void mhs3_f41ce0_census(safetyhook::Context& context);
+
     static void mhs3_producer_p0(safetyhook::Context& context);
     static void mhs3_producer_p1(safetyhook::Context& context);
     static void mhs3_producer_p2(safetyhook::Context& context);
@@ -205,6 +208,9 @@ protected:
     // Build #31G6.
     safetyhook::MidHook m_mhs3_producer_object_loop_begin_marker_direct_elapsed_hook{};
     safetyhook::MidHook m_mhs3_producer_object_loop_end_marker_direct_elapsed_hook{};
+
+    // Build #32.
+    safetyhook::MidHook m_mhs3_f41ce0_census_hook{};
 
     safetyhook::MidHook m_mhs3_producer_p0_hook{};
     safetyhook::MidHook m_mhs3_producer_p1_hook{};

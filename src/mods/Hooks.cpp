@@ -882,6 +882,14 @@ thread_local uint64_t g_mhs3_object_loop_marker = 0;
 // region. The hot object-loop end callback remains identical to Build #31G6.
 std::atomic<uint64_t> g_mhs3_object_loop_latest_us{0};
 
+// Build #32:
+// One-shot census of the concrete F41CE0 object/vtable pair.
+// State: 0 = uncaptured, 1 = capture in progress, 2 = complete.
+std::atomic<uint32_t> g_mhs3_f41ce0_census_state{0};
+std::atomic<uintptr_t> g_mhs3_f41ce0_object{0};
+std::atomic<uintptr_t> g_mhs3_f41ce0_vtable{0};
+std::atomic<bool> g_mhs3_f41ce0_reported{false};
+
 thread_local uint64_t g_mhs3_producer_p0_us = 0;
 thread_local uint64_t g_mhs3_producer_p1_us = 0;
 thread_local uint64_t g_mhs3_producer_p2_us = 0;
@@ -1005,6 +1013,30 @@ void maybe_report_mhs3_wait_callsites() {
         g_mhs3_object_loop_latest_us.load(std::memory_order_relaxed)
     );
 
+    if (
+        g_mhs3_f41ce0_census_state.load(std::memory_order_acquire) == 2 &&
+        !g_mhs3_f41ce0_reported.exchange(true, std::memory_order_acq_rel)
+    ) {
+        const auto object =
+            g_mhs3_f41ce0_object.load(std::memory_order_relaxed);
+        const auto vtable =
+            g_mhs3_f41ce0_vtable.load(std::memory_order_relaxed);
+
+        uintptr_t virtual_48 = 0;
+
+        if (vtable != 0) {
+            virtual_48 =
+                *reinterpret_cast<const uintptr_t*>(vtable + 0x48);
+        }
+
+        spdlog::info(
+            "[MHS3 F41CE0] object=0x{:x} vtable=0x{:x} virtual_48=0x{:x}",
+            object,
+            vtable,
+            virtual_48
+        );
+    }
+
     g_mhs3_wait_a_stats = {};
     g_mhs3_wait_b_stats = {};
     g_mhs3_wait_last_report = now;
@@ -1082,6 +1114,15 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     constexpr uintptr_t producer_object_loop_begin_marker_direct_elapsed_rva = 0x03fee8a;
     constexpr uintptr_t producer_object_loop_end_marker_direct_elapsed_rva   = 0x03fef06;
 
+    // Build #32:
+    // 147d1308e: mov (%rcx), %rax
+    // 147d13091: call *0x48(%rax)
+    //
+    // At the call instruction:
+    //   RCX = F41CE0 object
+    //   RAX = concrete vtable
+    constexpr uintptr_t f41ce0_census_rva = 0x07d13091;
+
     m_mhs3_producer_object_loop_begin_marker_direct_elapsed_hook =
         safetyhook::create_mid(
             (void*)(base + producer_object_loop_begin_marker_direct_elapsed_rva),
@@ -1107,6 +1148,21 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         "begin=0x{:x} end=0x{:x}",
         base + producer_object_loop_begin_marker_direct_elapsed_rva,
         base + producer_object_loop_end_marker_direct_elapsed_rva
+    );
+
+    m_mhs3_f41ce0_census_hook =
+        safetyhook::create_mid(
+            (void*)(base + f41ce0_census_rva),
+            &Hooks::mhs3_f41ce0_census
+        );
+
+    if (!m_mhs3_f41ce0_census_hook) {
+        return "Failed to install MHS3 Build #32 F41CE0 census probe";
+    }
+
+    spdlog::info(
+        "[MHS3 BUILD32] F41CE0 census probe installed: callsite=0x{:x}",
+        base + f41ce0_census_rva
     );
 
     m_mhs3_producer_p0_hook =
@@ -1285,6 +1341,31 @@ void Hooks::mhs3_producer_object_loop_end_marker_direct_elapsed(
     const auto elapsed_us = end_us - begin_us;
 
     g_mhs3_object_loop_marker = elapsed_us;
+}
+
+void Hooks::mhs3_f41ce0_census(safetyhook::Context& context) {
+    uint32_t expected = 0;
+
+    if (!g_mhs3_f41ce0_census_state.compare_exchange_strong(
+            expected,
+            1,
+            std::memory_order_acq_rel,
+            std::memory_order_relaxed
+        )) {
+        return;
+    }
+
+    g_mhs3_f41ce0_object.store(
+        static_cast<uintptr_t>(context.rcx),
+        std::memory_order_relaxed
+    );
+
+    g_mhs3_f41ce0_vtable.store(
+        static_cast<uintptr_t>(context.rax),
+        std::memory_order_relaxed
+    );
+
+    g_mhs3_f41ce0_census_state.store(2, std::memory_order_release);
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

@@ -1758,6 +1758,11 @@ void IntegrityCheckBypass::immediate_patch_re9() {
             spdlog::info("[IntegrityCheckBypass]: Hooked JobQueue::SubmitDescriptor in RE9 @ 0x{:X}!", *fn);
         }*/
 
+        // MHS3 31N diagnostic:
+        // Disable the JobQueue submission callsite mid-hooks.
+        // REFramework itself warns these fallback hooks may cause lag.
+        // Keep the surrounding RE9+/MHS3 integrity patches intact.
+#if 0
         static std::vector<SafetyHookMid> callsites{};
         const auto candidate_pats = std::vector<std::string>{
             "? 8b ? 08 ? 8b ? 10 ? 8b ? 18 48 85 c9 0f 84 ? ? ? ? ff d0", // observed in RE9 PC, MHSTORIES 3
@@ -1838,6 +1843,7 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                 spdlog::info("[IntegrityCheckBypass]: Hooked call site at 0x{:X}", *ref);
             }
         }
+#endif
     }
 
     // Scan for PE header integrity check (thanks to SunBeam for pointing out this exists in RE9 and showing me where it is!)

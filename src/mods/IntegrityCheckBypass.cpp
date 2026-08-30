@@ -1491,8 +1491,11 @@ void validate_job_func(SafetyHookContext& ctx) {
                 //SPDLOG_INFO("[IntegrityCheckBypass]: Caught integrity check job submission at call site, skipping! FuncPtr: 0x{:X}", func_ptr);
             }
         } else {
-            // also cache the original here for later.
-            remember_submit_descriptor_original_func_ptr(disasm_utils::get_register_value(ctx, reg), func_ptr);
+            // MHS3 31O diagnostic:
+            // Keep the job callsite validation hook active, but skip the
+            // normal-path descriptor cache write to test whether the
+            // shared_mutex/unordered_map bookkeeping contributes to stutter.
+            // remember_submit_descriptor_original_func_ptr(disasm_utils::get_register_value(ctx, reg), func_ptr);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ctx.rax = reinterpret_cast<uintptr_t>(&noop_job);

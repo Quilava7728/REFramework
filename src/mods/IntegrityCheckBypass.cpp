@@ -1491,8 +1491,20 @@ void validate_job_func(SafetyHookContext& ctx) {
                 //SPDLOG_INFO("[IntegrityCheckBypass]: Caught integrity check job submission at call site, skipping! FuncPtr: 0x{:X}", func_ptr);
             }
         } else {
-            // also cache the original here for later.
-            remember_submit_descriptor_original_func_ptr(disasm_utils::get_register_value(ctx, reg), func_ptr);
+            // MHS3 31P diagnostic:
+            // Preserve the global descriptor cache, but avoid repeatedly
+            // hitting its shared_mutex/unordered_map for the same pair
+            // on the same worker thread.
+            const auto descriptor = disasm_utils::get_register_value(ctx, reg);
+
+            thread_local int64_t last_descriptor = 0;
+            thread_local uintptr_t last_func_ptr = 0;
+
+            if (descriptor != last_descriptor || func_ptr != last_func_ptr) {
+                remember_submit_descriptor_original_func_ptr(descriptor, func_ptr);
+                last_descriptor = descriptor;
+                last_func_ptr = func_ptr;
+            }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ctx.rax = reinterpret_cast<uintptr_t>(&noop_job);

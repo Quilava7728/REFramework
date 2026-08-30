@@ -187,8 +187,6 @@ private:
         // MHS3 diagnostic: do not hook every application entry.
         // Keep BeginRendering for ScriptRunner and add only three cadence probes.
         HOOK_LAMBDA(hook_begin_rendering_only),
-        HOOK_LAMBDA(hook_mhs3_cadence_entries),
-        HOOK_LAMBDA(hook_mhs3_waitrendering_callsites),
     };
 
 protected:

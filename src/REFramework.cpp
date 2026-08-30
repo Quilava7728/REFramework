@@ -63,6 +63,11 @@ DEFINE_GUID(XUSB_INTERFACE_CLASS_GUID, 0xEC87F1E3, 0xC13B, 0x4100, 0xB5, 0xF7, 0
 std::unique_ptr<REFramework> g_framework{};
 
 void REFramework::hook_monitor() {
+    // MHS3 31L diagnostic:
+    // Completely suppress core D3D hook monitoring/rehooking.
+    // This intentionally disables the REFramework render/Present path.
+    return;
+
     if (m_do_not_hook_d3d_count.load() > 0) {
         // Wait until nothing important is happening
         m_last_present_time = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -704,7 +709,9 @@ REFramework::REFramework(HMODULE reframework_module)
 
     // If all is good, we can immediately hook D3D12 very early
     // else, defer to the hook monitor if anything in the chain failed
-    if (valid_render_frame) {
+    // MHS3 31L diagnostic:
+    // Do not install the core D3D12/Present hook.
+    if (false && valid_render_frame) {
         // We can guaranteed hook at this point
         std::scoped_lock _{m_hook_monitor_mutex};
         hook_d3d12();

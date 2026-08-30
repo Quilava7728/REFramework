@@ -1145,7 +1145,10 @@ void IntegrityCheckBypass::immediate_patch_dd2() {
 
     const auto& gi = sdk::GameIdentity::get();
     if (gi.tdb_ver() >= 74) {
-    init_anti_debug_watcher();
+    // MHS3 31M diagnostic:
+    // Disable the persistent anti-debug watcher.
+    // Keep the rest of immediate_patch_dd2 intact.
+    // init_anti_debug_watcher();
 
     // TODO: Check if full release of Pragmata needs this
     // right now it freezes the game

@@ -127,7 +127,7 @@ private:
     );
 
     // Build #31I: SaveServiceCore +0x938 setter census.
-    static void mhs3_setter_probe(safetyhook::Context& context);
+    static void mhs3_cadence_gate_probe(safetyhook::Context& context);
 
     static void mhs3_producer_p0(safetyhook::Context& context);
     static void mhs3_producer_p1(safetyhook::Context& context);
@@ -210,7 +210,7 @@ protected:
     safetyhook::MidHook m_mhs3_producer_object_loop_end_marker_direct_elapsed_hook{};
 
     // Build #31I.
-    safetyhook::MidHook m_mhs3_setter_probe_hook{};
+    safetyhook::MidHook m_mhs3_cadence_gate_probe_hook{};
 
     safetyhook::MidHook m_mhs3_producer_p0_hook{};
     safetyhook::MidHook m_mhs3_producer_p1_hook{};

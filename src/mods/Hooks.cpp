@@ -893,13 +893,7 @@ std::atomic<uint64_t> g_mhs3_object_loop_latest_us{0};
 //   [RSP] = caller return address
 //
 // State: 0 = no first sample, 1 = first sample being captured, 2 = captured.
-std::atomic<uint32_t> g_mhs3_setter_probe_state{0};
-std::atomic<uint64_t> g_mhs3_setter_calls{0};
-std::atomic<uint64_t> g_mhs3_setter_zero_calls{0};
-std::atomic<uint32_t> g_mhs3_setter_first_threshold{0};
-std::atomic<uint32_t> g_mhs3_setter_last_threshold{0};
-std::atomic<uintptr_t> g_mhs3_setter_first_caller{0};
-std::atomic<uintptr_t> g_mhs3_setter_last_caller{0};
+std::atomic<uint64_t> g_mhs3_cadence_gate_calls{0};
 
 thread_local uint64_t g_mhs3_producer_p0_us = 0;
 thread_local uint64_t g_mhs3_producer_p1_us = 0;
@@ -1024,18 +1018,10 @@ void maybe_report_mhs3_wait_callsites() {
         g_mhs3_object_loop_latest_us.load(std::memory_order_relaxed)
     );
 
-    if (g_mhs3_setter_probe_state.load(std::memory_order_acquire) == 2) {
-        spdlog::info(
-            "[MHS3 31I SETTER] calls={} zero_calls={} first_threshold={} "
-            "last_threshold={} first_caller=0x{:x} last_caller=0x{:x}",
-            g_mhs3_setter_calls.load(std::memory_order_relaxed),
-            g_mhs3_setter_zero_calls.load(std::memory_order_relaxed),
-            g_mhs3_setter_first_threshold.load(std::memory_order_relaxed),
-            g_mhs3_setter_last_threshold.load(std::memory_order_relaxed),
-            g_mhs3_setter_first_caller.load(std::memory_order_relaxed),
-            g_mhs3_setter_last_caller.load(std::memory_order_relaxed)
-        );
-    }
+    spdlog::info(
+        "[MHS3 31J CADENCE GATE] calls={}",
+        g_mhs3_cadence_gate_calls.load(std::memory_order_relaxed)
+    );
 
     g_mhs3_wait_a_stats = {};
     g_mhs3_wait_b_stats = {};
@@ -1122,7 +1108,7 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
     //   RDX  = source/string-ish input
     //   R8D  = threshold ultimately written to object + 0x938
     //   [RSP] = return address at function entry
-    constexpr uintptr_t setter_probe_rva = 0x07b211d0;
+    constexpr uintptr_t cadence_gate_probe_rva = 0x005d0c80;
 
     m_mhs3_producer_object_loop_begin_marker_direct_elapsed_hook =
         safetyhook::create_mid(
@@ -1151,19 +1137,19 @@ std::optional<std::string> Hooks::hook_mhs3_waitrendering_callsites() {
         base + producer_object_loop_end_marker_direct_elapsed_rva
     );
 
-    m_mhs3_setter_probe_hook =
+    m_mhs3_cadence_gate_probe_hook =
         safetyhook::create_mid(
-            (void*)(base + setter_probe_rva),
-            &Hooks::mhs3_setter_probe
+            (void*)(base + cadence_gate_probe_rva),
+            &Hooks::mhs3_cadence_gate_probe
         );
 
-    if (!m_mhs3_setter_probe_hook) {
-        return "Failed to install MHS3 Build #31I setter probe";
+    if (!m_mhs3_cadence_gate_probe_hook) {
+        return "Failed to install MHS3 Build #31J cadence gate probe";
     }
 
     spdlog::info(
-        "[MHS3 31I] setter probe installed: entry=0x{:x}",
-        base + setter_probe_rva
+        "[MHS3 31J] cadence gate probe installed: entry=0x{:x}",
+        base + cadence_gate_probe_rva
     );
 
     m_mhs3_producer_p0_hook =
@@ -1344,52 +1330,8 @@ void Hooks::mhs3_producer_object_loop_end_marker_direct_elapsed(
     g_mhs3_object_loop_marker = elapsed_us;
 }
 
-void Hooks::mhs3_setter_probe(safetyhook::Context& context) {
-    const auto threshold = static_cast<uint32_t>(context.r8);
-
-    // Because this MidHook is placed at the first instruction of
-    // 147B211D0, RSP still points at the caller's return address.
-    const auto caller =
-        *reinterpret_cast<const uintptr_t*>(
-            static_cast<uintptr_t>(context.rsp)
-        );
-
-    g_mhs3_setter_calls.fetch_add(1, std::memory_order_relaxed);
-
-    if (threshold == 0) {
-        g_mhs3_setter_zero_calls.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    g_mhs3_setter_last_threshold.store(
-        threshold,
-        std::memory_order_relaxed
-    );
-
-    g_mhs3_setter_last_caller.store(
-        caller,
-        std::memory_order_relaxed
-    );
-
-    uint32_t expected = 0;
-
-    if (g_mhs3_setter_probe_state.compare_exchange_strong(
-            expected,
-            1,
-            std::memory_order_acq_rel,
-            std::memory_order_relaxed
-        )) {
-        g_mhs3_setter_first_threshold.store(
-            threshold,
-            std::memory_order_relaxed
-        );
-
-        g_mhs3_setter_first_caller.store(
-            caller,
-            std::memory_order_relaxed
-        );
-
-        g_mhs3_setter_probe_state.store(2, std::memory_order_release);
-    }
+void Hooks::mhs3_cadence_gate_probe(safetyhook::Context&) {
+    g_mhs3_cadence_gate_calls.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Hooks::mhs3_producer_p0(safetyhook::Context& context) {

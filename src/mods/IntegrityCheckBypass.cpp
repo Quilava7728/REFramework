@@ -263,7 +263,11 @@ std::optional<std::string> IntegrityCheckBypass::on_initialize() {
 void IntegrityCheckBypass::on_frame() {
     const auto& gi = sdk::GameIdentity::get();
 
-    re9_heartbeat_bypass();
+    // MHS3 31Q diagnostic:
+    // Disable the per-frame RE9+/TDB82 heartbeat bypass to determine
+    // whether heartbeat synchronization is causing or preventing
+    // the recurring severe stutter.
+    // re9_heartbeat_bypass();
 
     if (gi.is_re3()) {
         if (m_bypass_integrity_checks != nullptr) {

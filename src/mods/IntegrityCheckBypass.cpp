@@ -2,6 +2,8 @@
 #include <shared_mutex>
 #include <iomanip>
 #include <regex>
+#include <atomic>
+#include <chrono>
 
 #include <asmjit/asmjit.h>
 #include <asmjit/x86/x86assembler.h>
@@ -1462,10 +1464,111 @@ uintptr_t __fastcall hk_JobQueue_SubmitDescriptor(uintptr_t scheduler, int64_t d
 // Harmless replacement - just returns
 static void __fastcall noop_job(int64_t, int64_t) {}
 
+// MHS3 31T diagnostic:
+// Lightweight aggregate telemetry for the RE9+/MHS3 fallback
+// job-validation hooks. No repair/cache/job behavior is changed.
+struct JobValidationTelemetry {
+    std::atomic<uint64_t> calls{0};
+    std::atomic<uint64_t> normal{0};
+    std::atomic<uint64_t> ud2{0};
+    std::atomic<uint64_t> restored{0};
+    std::atomic<uint64_t> noop{0};
+    std::atomic<uint64_t> null_func{0};
+    std::atomic<uint64_t> unreadable_func{0};
+    std::atomic<uint64_t> exceptions{0};
+
+    // Never reset. Used only to make clock checks rare.
+    std::atomic<uint64_t> probe_counter{0};
+    std::atomic<uint64_t> last_report_ns{0};
+};
+
+static JobValidationTelemetry& get_job_validation_telemetry() {
+    static JobValidationTelemetry telemetry{};
+    return telemetry;
+}
+
+static uint64_t job_validation_now_ns() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
+
+static void maybe_report_job_validation_telemetry() {
+    auto& t = get_job_validation_telemetry();
+
+    // Avoid calling the clock on every hot-path invocation.
+    const auto probe =
+        t.probe_counter.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    if ((probe & 0x7FF) != 0) { // once every 2048 validations
+        return;
+    }
+
+    const auto now_ns = job_validation_now_ns();
+    constexpr uint64_t REPORT_INTERVAL_NS = 1'000'000'000ULL;
+
+    auto last_report = t.last_report_ns.load(std::memory_order_relaxed);
+
+    if (last_report == 0) {
+        t.last_report_ns.compare_exchange_strong(
+            last_report,
+            now_ns,
+            std::memory_order_relaxed
+        );
+        return;
+    }
+
+    if ((now_ns - last_report) < REPORT_INTERVAL_NS) {
+        return;
+    }
+
+    if (!t.last_report_ns.compare_exchange_strong(
+            last_report,
+            now_ns,
+            std::memory_order_relaxed))
+    {
+        return;
+    }
+
+    const auto calls =
+        t.calls.exchange(0, std::memory_order_relaxed);
+    const auto normal =
+        t.normal.exchange(0, std::memory_order_relaxed);
+    const auto ud2 =
+        t.ud2.exchange(0, std::memory_order_relaxed);
+    const auto restored =
+        t.restored.exchange(0, std::memory_order_relaxed);
+    const auto noop =
+        t.noop.exchange(0, std::memory_order_relaxed);
+    const auto null_func =
+        t.null_func.exchange(0, std::memory_order_relaxed);
+    const auto unreadable =
+        t.unreadable_func.exchange(0, std::memory_order_relaxed);
+    const auto exceptions =
+        t.exceptions.exchange(0, std::memory_order_relaxed);
+
+    SPDLOG_INFO(
+        "[IntegrityCheckBypass][31T] Job validation: calls={}, normal={}, ud2={}, restored={}, noop={}, null={}, unreadable={}, exceptions={}",
+        calls,
+        normal,
+        ud2,
+        restored,
+        noop,
+        null_func,
+        unreadable,
+        exceptions
+    );
+}
+
 template<int reg>
 void validate_job_func(SafetyHookContext& ctx) {
+    auto& telemetry = get_job_validation_telemetry();
+    telemetry.calls.fetch_add(1, std::memory_order_relaxed);
+
     auto func_ptr = ctx.rax;
     if (!func_ptr) {
+        telemetry.null_func.fetch_add(1, std::memory_order_relaxed);
+        maybe_report_job_validation_telemetry();
         return;
     }
 
@@ -1474,30 +1577,42 @@ void validate_job_func(SafetyHookContext& ctx) {
         volatile uint64_t dummy = *(volatile uint64_t*)func_ptr;
         (void)dummy;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        telemetry.unreadable_func.fetch_add(1, std::memory_order_relaxed);
+        maybe_report_job_validation_telemetry();
         return;
     }
 
     __try {
         // UD2
         if (*reinterpret_cast<uint16_t*>(func_ptr) == 0x0B0F) {
+            telemetry.ud2.fetch_add(1, std::memory_order_relaxed);
+
             // if we already have a cached original, restore it to prevent crashes.
             const auto original_func_ptr = get_submit_descriptor_original_func_ptr(disasm_utils::get_register_value(ctx, reg));
             if (original_func_ptr != 0 && original_func_ptr != func_ptr) {
                 ctx.rax = original_func_ptr;
                 *(uintptr_t*)(disasm_utils::get_register_value(ctx, reg) + 8) = original_func_ptr; // restore the func ptr in the descriptor as well.
+                telemetry.restored.fetch_add(1, std::memory_order_relaxed);
                 SPDLOG_INFO("[IntegrityCheckBypass]: Restored descriptor 0x{:X} func pointer to 0x{:X} in job func validation (was 0x{:X})", disasm_utils::get_register_value(ctx, reg), original_func_ptr, func_ptr);
             } else {
+                telemetry.noop.fetch_add(1, std::memory_order_relaxed);
                 ctx.rax = reinterpret_cast<uintptr_t>(&noop_job);
                 //SPDLOG_INFO("[IntegrityCheckBypass]: Caught integrity check job submission at call site, skipping! FuncPtr: 0x{:X}", func_ptr);
             }
         } else {
+            telemetry.normal.fetch_add(1, std::memory_order_relaxed);
+
             // also cache the original here for later.
             remember_submit_descriptor_original_func_ptr(disasm_utils::get_register_value(ctx, reg), func_ptr);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        telemetry.exceptions.fetch_add(1, std::memory_order_relaxed);
+        telemetry.noop.fetch_add(1, std::memory_order_relaxed);
         ctx.rax = reinterpret_cast<uintptr_t>(&noop_job);
         SPDLOG_WARN("[IntegrityCheckBypass]: Exception caught while validating job function pointer. FuncPtr: 0x{:X}", func_ptr);
     }
+
+    maybe_report_job_validation_telemetry();
 }
 
 void IntegrityCheckBypass::immediate_patch_re9() {

@@ -2081,6 +2081,19 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
                 } catch (...) {}
             }
 
+            // MHS3 31R telemetry:
+            // Report detector state occasionally without changing behavior.
+            if ((frame_count % 300) == 0) {
+                spdlog::info(
+                    "[IntegrityCheckBypass] Heartbeat telemetry: frame={}, this_frame_candidates={}, persistent_candidates={}, confirmations={}, locked={}",
+                    frame_count,
+                    this_frame.size(),
+                    candidates.size(),
+                    confirmation_count,
+                    heartbeat_offset_start != nullptr
+                );
+            }
+
             if (candidates.empty()) {
                 // First scan, seed candidates
                 candidates = std::move(this_frame);

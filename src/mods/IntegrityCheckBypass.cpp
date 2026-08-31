@@ -1447,9 +1447,10 @@ uintptr_t __fastcall hk_JobQueue_SubmitDescriptor(uintptr_t scheduler, int64_t d
 
                 const auto retaddr = (uintptr_t)_ReturnAddress();
                 SPDLOG_INFO("[IntegrityCheckBypass]: Caught integrity check job submission! Descriptor: 0x{:X}, Func Ptr: 0x{:X}, Return Address: 0x{:X}", descriptor, func_ptr, retaddr);
-            }
 
-            if (func_ptr) {
+                // Do NOT cache func_ptr here. It is the anti-tamper UD2
+                // replacement and would poison the saved clean pointer.
+            } else if (func_ptr) {
                 remember_submit_descriptor_original_func_ptr(first_entry, func_ptr);
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) {

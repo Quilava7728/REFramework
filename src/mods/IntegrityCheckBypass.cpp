@@ -2014,6 +2014,24 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
     static auto get_RenderFrame = renderer_t != nullptr ? renderer_t->get_method("get_RenderFrame") : nullptr;
     auto renderer = sdk::get_native_singleton("via.render.Renderer");
 
+    // MHS3 31S telemetry:
+    // Observe whether the heartbeat bypass prerequisites ever become available.
+    // No behavior is changed.
+    static uint64_t heartbeat_call_count = 0;
+    heartbeat_call_count++;
+
+    if (renderer == nullptr || renderer_t == nullptr || get_RenderFrame == nullptr) {
+        if (heartbeat_call_count == 1 || (heartbeat_call_count % 600) == 0) {
+            spdlog::info(
+                "[IntegrityCheckBypass] Heartbeat state: calls={}, renderer={}, renderer_t={}, get_RenderFrame={}",
+                heartbeat_call_count,
+                renderer != nullptr,
+                renderer_t != nullptr,
+                get_RenderFrame != nullptr
+            );
+        }
+    }
+
     if (renderer != nullptr && renderer_t != nullptr && get_RenderFrame != nullptr) {
         static uint32_t* heartbeat_offset_start{nullptr};
         static std::vector<uintptr_t> candidates{};
@@ -2026,10 +2044,23 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         const auto frame_count = get_RenderFrame->call<uint32_t>(); // static func
         const auto renderer_addr = (uintptr_t)renderer;
 
+        static uint32_t last_telemetry_frame = 0;
+
         if (heartbeat_offset_start != nullptr) {
             // Confirmed, sync heartbeats to frame counter every frame
             for (size_t i = 0; i < HEARTBEAT_COUNT; i++) {
                 heartbeat_offset_start[i] = frame_count;
+            }
+
+            if (last_telemetry_frame == 0 ||
+                (uint32_t)(frame_count - last_telemetry_frame) >= 300)
+            {
+                spdlog::info(
+                    "[IntegrityCheckBypass] Heartbeat telemetry: frame={}, locked=true, offset=0x{:X}",
+                    frame_count,
+                    (uintptr_t)heartbeat_offset_start - renderer_addr
+                );
+                last_telemetry_frame = frame_count;
             }
         } else if (frame_count > 100 && frame_count != last_scan_frame) {
             // Debug for RE9 (known to be at 0x3328)
@@ -2079,6 +2110,19 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
                         this_frame.push_back(renderer_addr + i);
                     }
                 } catch (...) {}
+            }
+
+            if (last_telemetry_frame == 0 ||
+                (uint32_t)(frame_count - last_telemetry_frame) >= 300)
+            {
+                spdlog::info(
+                    "[IntegrityCheckBypass] Heartbeat telemetry: frame={}, this_frame_candidates={}, persistent_candidates={}, confirmations={}, locked=false",
+                    frame_count,
+                    this_frame.size(),
+                    candidates.size(),
+                    confirmation_count
+                );
+                last_telemetry_frame = frame_count;
             }
 
             if (candidates.empty()) {

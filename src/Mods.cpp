@@ -25,67 +25,21 @@
 #include "Mods.hpp"
 
 Mods::Mods() {
-    m_mods.emplace_back(BackBufferRenderer::get());
+    // MHS3 Runtime v0.1:
+    // Keep only the minimum known-survivable runtime components.
+
     m_mods.emplace_back(REFrameworkConfig::get());
 
-    // IntegrityCheckBypass: only for games with anti-tamper (REENGINE_AT)
+    // Keep anti-tamper handling intact for v0.1.
+    // We will split bootstrap/runtime behavior in v0.2.
     if (sdk::GameIdentity::get().is_reengine_at()) {
         m_mods.emplace_back(IntegrityCheckBypass::get_shared_instance());
     }
 
-#ifndef BAREBONES
-    m_mods.emplace_back(MethodDatabase::get());
-    m_mods.emplace_back(Hooks::get());
-    m_mods.emplace_back(LooseFileLoader::get());
-
-    if (sdk::GameIdentity::get().tdb_ver() >= 81) {
-        m_mods.emplace_back(FaultyFileDetector::get());
-    }
-
-    m_mods.emplace_back(VR::get());
-
-    if (sdk::GameIdentity::get().is_re8() || sdk::GameIdentity::get().is_re7()) {
-        m_mods.emplace_back(RE8VR::get());
-    }
-
-    {
-        const auto& gi = sdk::GameIdentity::get();
-        if (!gi.is_re8() && (gi.is_re2() || gi.is_re3())) {
-            m_mods.emplace_back(FirstPerson::get());
-        }
-    }
-
-    // All games!!!!
-    m_mods.emplace_back(std::make_unique<Camera>());
-    m_mods.emplace_back(Graphics::get());
-
-    {
-        const auto& gi = sdk::GameIdentity::get();
-        if (gi.is_re2() || gi.is_re3() || gi.is_re8()) {
-            m_mods.emplace_back(std::make_unique<ManualFlashlight>());
-        }
-    }
-
-    m_mods.emplace_back(std::make_unique<FreeCam>());
-
-    if (sdk::GameIdentity::get().tdb_ver() > 49) {
-        m_mods.emplace_back(std::make_unique<SceneMods>());
-    }
-
-#endif
-
-    // MHS3 diagnostic: reduced Hooks module, BeginRendering only.
+    // Reduced MHS3 BeginRendering hook used as the engine-thread heartbeat.
     m_mods.emplace_back(Hooks::get());
 
-#ifdef DEVELOPER
-    auto dev_tools = std::make_shared<DeveloperTools>();
-    m_mods.emplace_back(dev_tools);
-
-    for (auto& tool : dev_tools->get_tools()) {
-        m_mods.emplace_back(tool);
-    }
-#endif
-
+    // Script/plugin runtime.
     m_mods.emplace_back(APIProxy::get());
     m_mods.emplace_back(PluginLoader::get());
     m_mods.emplace_back(ScriptRunner::get());

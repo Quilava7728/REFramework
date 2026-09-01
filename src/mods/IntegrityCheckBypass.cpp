@@ -1749,8 +1749,8 @@ void IntegrityCheckBypass::immediate_patch_re9() {
     // epilogue signature above doesn't match). The UD2 writer instruction 'mov [rax+rcx+8], rdx'
     // (48 89 ? 08 08) is unique or near-unique in the anti-tamper section. Searching backwards from it
     // for the SETcc + dispatch table load pattern finds the discriminator reliably.
-#if 0
-    if (!result) {
+#if 1
+    if (sdk::GameIdentity::get().is_mhstories3() && !result) {
         spdlog::info("[IntegrityCheckBypass]: Epilogue scan failed, trying UD2 writer anchor approach...");
 
         for (auto ud2_ref = utility::scan(game, "48 89 ? 08 08");

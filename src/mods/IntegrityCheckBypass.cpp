@@ -1963,19 +1963,19 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                     spdlog::info("[IntegrityCheckBypass]: Found SETcc dispatch via UD2 writer anchor @ 0x{:X} ({}B), UD2 writer @ 0x{:X}",
                         *result, nop_size, *ud2_ref);
 
-                    if (sdk::GameIdentity::get().is_mhstories3() &&
-                        !g_mhs3_ud2_writer_hook_installed)
-                    {
-                        g_mhs3_ud2_writer_hook =
-                            safetyhook::create_mid(
-                                reinterpret_cast<void*>(*ud2_ref),
-                                &mhs3_ud2_writer_telemetry
-                            );
+                    if (sdk::GameIdentity::get().is_mhstories3()) {
+                        // MHS3 runtime v0.6:
+                        // v0.4/v0.5 proved this instruction is the source of the poisoned
+                        // JobQueue function pointers. Instead of intercepting this extremely
+                        // hot writer with a SafetyHook callback, disable the 5-byte store
+                        // directly and measure whether the remaining stutter disappears.
+                        std::vector<int16_t> writer_nops(5, 0x90);
 
-                        g_mhs3_ud2_writer_hook_installed = true;
+                        static auto writer_patch =
+                            Patch::create(*ud2_ref, writer_nops, true);
 
                         SPDLOG_INFO(
-                            "[IntegrityCheckBypass][v0.4 WRITER]: Hooked UD2 writer @ 0x{:X}",
+                            "[IntegrityCheckBypass][v0.6]: NOP'd MHS3 UD2 writer @ 0x{:X}",
                             *ud2_ref
                         );
                     }

@@ -1999,8 +1999,13 @@ void IntegrityCheckBypass::immediate_patch_re9() {
         spdlog::info("[IntegrityCheckBypass]: Patched slow path discriminator!");
     }
     
-    // Hook this anyways as a backup plan.
-    {
+    // MHS3 runtime v0.5:
+    // The source-side UD2 writer blocker now prevents poisoned job
+    // function pointers from reaching SubmitDescriptor. Do not install
+    // the downstream validation/cache/noop callsite hooks on MHS3.
+    //
+    // Keep the fallback unchanged for other RE9-family targets.
+    if (!sdk::GameIdentity::get().is_mhstories3()) {
         if (!result) {
             spdlog::error("[IntegrityCheckBypass]: Could not find conditional move instruction for thread scheduler corruptor in RE9!");
             spdlog::error("[IntegrityCheckBypass]: Could not find thread scheduler corruptor in RE9!");

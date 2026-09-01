@@ -1561,6 +1561,49 @@ static void maybe_report_job_validation_telemetry() {
     );
 }
 
+
+static SafetyHookMid g_mhs3_ud2_writer_hook{};
+static bool g_mhs3_ud2_writer_hook_installed = false;
+
+static void mhs3_ud2_writer_telemetry(SafetyHookContext& ctx) {
+    const auto destination = ctx.rax + ctx.rcx + 8;
+    const auto new_value = ctx.rsi;
+
+    uintptr_t old_value = 0;
+    bool destination_readable = false;
+    bool new_is_ud2 = false;
+
+    __try {
+        old_value = *reinterpret_cast<uintptr_t*>(destination);
+        destination_readable = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        destination_readable = false;
+    }
+
+    if (new_value != 0) {
+        __try {
+            new_is_ud2 =
+                *reinterpret_cast<uint16_t*>(new_value) == 0x0B0F;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            new_is_ud2 = false;
+        }
+    }
+
+    if (new_is_ud2) {
+        SPDLOG_WARN(
+            "[IntegrityCheckBypass][v0.3 WRITER] UD2 write: dst=0x{:X}, old=0x{:X}, new=0x{:X}, rax=0x{:X}, rcx=0x{:X}, rsi=0x{:X}, rsp=0x{:X}, readable={}",
+            destination,
+            old_value,
+            new_value,
+            ctx.rax,
+            ctx.rcx,
+            ctx.rsi,
+            ctx.rsp,
+            destination_readable
+        );
+    }
+}
+
 template<int reg>
 void validate_job_func(SafetyHookContext& ctx) {
     auto& telemetry = get_job_validation_telemetry();
@@ -1828,6 +1871,23 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                     nop_size = setcc_len;
                     spdlog::info("[IntegrityCheckBypass]: Found SETcc dispatch via UD2 writer anchor @ 0x{:X} ({}B), UD2 writer @ 0x{:X}",
                         *result, nop_size, *ud2_ref);
+
+                    if (sdk::GameIdentity::get().is_mhstories3() &&
+                        !g_mhs3_ud2_writer_hook_installed)
+                    {
+                        g_mhs3_ud2_writer_hook =
+                            safetyhook::create_mid(
+                                reinterpret_cast<void*>(*ud2_ref),
+                                &mhs3_ud2_writer_telemetry
+                            );
+
+                        g_mhs3_ud2_writer_hook_installed = true;
+
+                        SPDLOG_INFO(
+                            "[IntegrityCheckBypass][v0.3 WRITER]: Hooked UD2 writer @ 0x{:X}",
+                            *ud2_ref
+                        );
+                    }
                     break;
                 }
             }

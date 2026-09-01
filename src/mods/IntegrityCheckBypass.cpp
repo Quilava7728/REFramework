@@ -4,6 +4,7 @@
 #include <regex>
 #include <atomic>
 #include <chrono>
+#include <thread>
 
 #include <asmjit/asmjit.h>
 #include <asmjit/x86/x86assembler.h>
@@ -1562,6 +1563,38 @@ static void maybe_report_job_validation_telemetry() {
 }
 
 
+static SafetyHookMid g_mhs3_bf2_hook{};
+static bool g_mhs3_bf2_hook_installed = false;
+static std::atomic<uint64_t> g_mhs3_bf2_hits{0};
+
+static void mhs3_bf2_counter(SafetyHookContext&) {
+    g_mhs3_bf2_hits.fetch_add(1, std::memory_order_relaxed);
+}
+
+static void start_mhs3_bf2_reporter() {
+    static bool started = false;
+
+    if (started) {
+        return;
+    }
+
+    started = true;
+
+    std::thread([]() {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            const auto hits =
+                g_mhs3_bf2_hits.exchange(0, std::memory_order_relaxed);
+
+            SPDLOG_INFO(
+                "[IntegrityCheckBypass][v0.7 BF2] hits_per_second={}",
+                hits
+            );
+        }
+    }).detach();
+}
+
 static SafetyHookMid g_mhs3_ud2_writer_hook{};
 static bool g_mhs3_ud2_writer_hook_installed = false;
 
@@ -1978,6 +2011,27 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                             "[IntegrityCheckBypass][v0.6]: NOP'd MHS3 UD2 writer @ 0x{:X}",
                             *ud2_ref
                         );
+
+                        // MHS3 runtime v0.7:
+                        // Count entries into the shared upstream anti-tamper body.
+                        // The hot callback only performs one relaxed atomic increment.
+                        constexpr uintptr_t mhs3_bf2 = 0x1538A0BF2;
+
+                        if (!g_mhs3_bf2_hook_installed) {
+                            g_mhs3_bf2_hook =
+                                safetyhook::create_mid(
+                                    reinterpret_cast<void*>(mhs3_bf2),
+                                    &mhs3_bf2_counter
+                                );
+
+                            g_mhs3_bf2_hook_installed = true;
+                            start_mhs3_bf2_reporter();
+
+                            SPDLOG_INFO(
+                                "[IntegrityCheckBypass][v0.7]: Hooked BF2 convergence point @ 0x{:X}",
+                                mhs3_bf2
+                            );
+                        }
                     }
                     break;
                 }

@@ -1565,20 +1565,67 @@ static void maybe_report_job_validation_telemetry() {
 static SafetyHookMid g_mhs3_ud2_writer_hook{};
 static bool g_mhs3_ud2_writer_hook_installed = false;
 
+struct MHS3WriterTelemetry {
+    std::atomic<uint64_t> ud2_attempts{0};
+    std::atomic<uint64_t> blocked{0};
+    std::atomic<uint64_t> already_poisoned{0};
+    std::atomic<uint64_t> unreadable_destination{0};
+    std::atomic<uint64_t> last_report_ns{0};
+};
+
+static MHS3WriterTelemetry& get_mhs3_writer_telemetry() {
+    static MHS3WriterTelemetry telemetry{};
+    return telemetry;
+}
+
+static void maybe_report_mhs3_writer_telemetry() {
+    auto& t = get_mhs3_writer_telemetry();
+
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+
+    auto last_report = t.last_report_ns.load(std::memory_order_relaxed);
+
+    if (last_report != 0 &&
+        now_ns - last_report < 1000000000LL)
+    {
+        return;
+    }
+
+    if (!t.last_report_ns.compare_exchange_strong(
+            last_report,
+            now_ns,
+            std::memory_order_relaxed))
+    {
+        return;
+    }
+
+    const auto ud2_attempts =
+        t.ud2_attempts.exchange(0, std::memory_order_relaxed);
+    const auto blocked =
+        t.blocked.exchange(0, std::memory_order_relaxed);
+    const auto already_poisoned =
+        t.already_poisoned.exchange(0, std::memory_order_relaxed);
+    const auto unreadable_destination =
+        t.unreadable_destination.exchange(0, std::memory_order_relaxed);
+
+    SPDLOG_INFO(
+        "[IntegrityCheckBypass][v0.4 WRITER] ud2_attempts={}, blocked={}, already_poisoned={}, unreadable_destination={}",
+        ud2_attempts,
+        blocked,
+        already_poisoned,
+        unreadable_destination
+    );
+}
+
 static void mhs3_ud2_writer_telemetry(SafetyHookContext& ctx) {
+    auto& telemetry = get_mhs3_writer_telemetry();
+
     const auto destination = ctx.rax + ctx.rcx + 8;
     const auto new_value = ctx.rsi;
 
-    uintptr_t old_value = 0;
-    bool destination_readable = false;
     bool new_is_ud2 = false;
-
-    __try {
-        old_value = *reinterpret_cast<uintptr_t*>(destination);
-        destination_readable = true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        destination_readable = false;
-    }
 
     if (new_value != 0) {
         __try {
@@ -1589,19 +1636,63 @@ static void mhs3_ud2_writer_telemetry(SafetyHookContext& ctx) {
         }
     }
 
-    if (new_is_ud2) {
-        SPDLOG_WARN(
-            "[IntegrityCheckBypass][v0.3 WRITER] UD2 write: dst=0x{:X}, old=0x{:X}, new=0x{:X}, rax=0x{:X}, rcx=0x{:X}, rsi=0x{:X}, rsp=0x{:X}, readable={}",
-            destination,
-            old_value,
-            new_value,
-            ctx.rax,
-            ctx.rcx,
-            ctx.rsi,
-            ctx.rsp,
-            destination_readable
+    if (!new_is_ud2) {
+        return;
+    }
+
+    telemetry.ud2_attempts.fetch_add(1, std::memory_order_relaxed);
+
+    uintptr_t old_value = 0;
+
+    __try {
+        old_value = *reinterpret_cast<uintptr_t*>(destination);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        telemetry.unreadable_destination.fetch_add(
+            1,
+            std::memory_order_relaxed
+        );
+        maybe_report_mhs3_writer_telemetry();
+        return;
+    }
+
+    bool old_is_ud2 = false;
+
+    if (old_value != 0) {
+        __try {
+            old_is_ud2 =
+                *reinterpret_cast<uint16_t*>(old_value) == 0x0B0F;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            // We know the destination itself was readable, but the
+            // pointer stored there cannot safely be inspected.
+            maybe_report_mhs3_writer_telemetry();
+            return;
+        }
+    }
+
+    if (old_is_ud2) {
+        telemetry.already_poisoned.fetch_add(
+            1,
+            std::memory_order_relaxed
+        );
+        maybe_report_mhs3_writer_telemetry();
+        return;
+    }
+
+    if (old_value != 0) {
+        // The original instruction immediately after this hook is:
+        //     mov [rax+rcx+8], rsi
+        //
+        // Preserve the legitimate function pointer already present
+        // instead of allowing the incoming UD2 pointer to replace it.
+        ctx.rsi = old_value;
+
+        telemetry.blocked.fetch_add(
+            1,
+            std::memory_order_relaxed
         );
     }
+
+    maybe_report_mhs3_writer_telemetry();
 }
 
 template<int reg>
@@ -1884,7 +1975,7 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                         g_mhs3_ud2_writer_hook_installed = true;
 
                         SPDLOG_INFO(
-                            "[IntegrityCheckBypass][v0.3 WRITER]: Hooked UD2 writer @ 0x{:X}",
+                            "[IntegrityCheckBypass][v0.4 WRITER]: Hooked UD2 writer @ 0x{:X}",
                             *ud2_ref
                         );
                     }

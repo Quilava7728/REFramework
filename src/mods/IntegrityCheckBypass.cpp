@@ -28,9 +28,12 @@ struct IntegrityCheckPattern {
 
 std::shared_ptr<IntegrityCheckBypass> s_integrity_check_bypass_instance{nullptr};
 
-// MHS3 runtime v0.11:
-// Capture a small raw stack only when the known BF2 anti-tamper path
+// MHS3 runtime v0.12:
+// Capture raw stack qwords when the known BF2 anti-tamper path
 // wakes up after a quiet period.
+//
+// CaptureStackBackTrace cannot unwind through this obfuscated path,
+// so inspect the actual stack directly instead.
 //
 // Treat a BF2 hit after >= 2 seconds of silence as a new episode.
 // Capture at most 12 episodes for the entire process.
@@ -38,9 +41,14 @@ static SafetyHookMid g_mhs3_bf2_episode_hook{};
 static std::atomic<uint64_t> g_mhs3_bf2_last_hit_ms{0};
 static std::atomic<uint32_t> g_mhs3_bf2_episode_count{0};
 
-static void mhs3_bf2_episode_probe(SafetyHookContext&) {
+static void mhs3_bf2_episode_probe(SafetyHookContext& ctx) {
     constexpr uint64_t QUIET_PERIOD_MS = 2000;
     constexpr uint32_t MAX_EPISODES = 12;
+    constexpr uint32_t STACK_QWORDS = 24;
+
+    // Broad range covering the MHS3 executable image.
+    constexpr uintptr_t GAME_ADDR_MIN = 0x140000000;
+    constexpr uintptr_t GAME_ADDR_MAX = 0x160000000;
 
     const auto now_ms = GetTickCount64();
     const auto previous_ms =
@@ -57,38 +65,29 @@ static void mhs3_bf2_episode_probe(SafetyHookContext&) {
         return;
     }
 
-    void* frames[12]{};
-
-    const auto frame_count =
-        CaptureStackBackTrace(
-            0,
-            (DWORD)std::size(frames),
-            frames,
-            nullptr
-        );
-
     SPDLOG_WARN(
-        "[IntegrityCheckBypass][v0.11 BF2 EPISODE] "
-        "episode={} tid={} frames={} "
-        "f0=0x{:X} f1=0x{:X} f2=0x{:X} f3=0x{:X} "
-        "f4=0x{:X} f5=0x{:X} f6=0x{:X} f7=0x{:X} "
-        "f8=0x{:X} f9=0x{:X} f10=0x{:X} f11=0x{:X}",
+        "[IntegrityCheckBypass][v0.12 BF2 EPISODE] "
+        "episode={} tid={} rsp=0x{:X}",
         episode + 1,
         GetCurrentThreadId(),
-        frame_count,
-        frame_count > 0 ? (uintptr_t)frames[0] : 0,
-        frame_count > 1 ? (uintptr_t)frames[1] : 0,
-        frame_count > 2 ? (uintptr_t)frames[2] : 0,
-        frame_count > 3 ? (uintptr_t)frames[3] : 0,
-        frame_count > 4 ? (uintptr_t)frames[4] : 0,
-        frame_count > 5 ? (uintptr_t)frames[5] : 0,
-        frame_count > 6 ? (uintptr_t)frames[6] : 0,
-        frame_count > 7 ? (uintptr_t)frames[7] : 0,
-        frame_count > 8 ? (uintptr_t)frames[8] : 0,
-        frame_count > 9 ? (uintptr_t)frames[9] : 0,
-        frame_count > 10 ? (uintptr_t)frames[10] : 0,
-        frame_count > 11 ? (uintptr_t)frames[11] : 0
+        ctx.rsp
     );
+
+    const auto stack = reinterpret_cast<const uintptr_t*>(ctx.rsp);
+
+    for (uint32_t i = 0; i < STACK_QWORDS; ++i) {
+        const auto value = stack[i];
+
+        if (value >= GAME_ADDR_MIN && value < GAME_ADDR_MAX) {
+            SPDLOG_WARN(
+                "[IntegrityCheckBypass][v0.12 BF2 STACK] "
+                "episode={} slot={:02} addr=0x{:X}",
+                episode + 1,
+                i,
+                value
+            );
+        }
+    }
 }
 
 
@@ -2114,7 +2113,7 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                             );
 
                         SPDLOG_INFO(
-                            "[IntegrityCheckBypass][v0.11]: Hooked BF2 episode probe @ 0x{:X}",
+                            "[IntegrityCheckBypass][v0.12]: Hooked BF2 episode probe @ 0x{:X}",
                             mhs3_bf2
                         );
 

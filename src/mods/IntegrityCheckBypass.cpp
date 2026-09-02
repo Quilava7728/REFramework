@@ -2018,6 +2018,25 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                         SPDLOG_INFO(
                             "[IntegrityCheckBypass][v0.9]: Forced dispatcher 0x1538A0177 to index 0"
                         );
+
+                        // MHS3 runtime v0.10:
+                        // 0x1538A0346 is SETNE al after RAX is explicitly zeroed.
+                        // NOPing SETNE therefore forces dispatch-table index 0,
+                        // selecting the short path at 0x1538A0355 instead of
+                        // the larger index-1 body at 0x1538A04BF.
+                        constexpr uintptr_t mhs3_dispatch_0346 = 0x1538A0346;
+                        std::vector<int16_t> dispatch_0346_nops(3, 0x90);
+
+                        static auto dispatch_0346_patch =
+                            Patch::create(
+                                mhs3_dispatch_0346,
+                                dispatch_0346_nops,
+                                true
+                            );
+
+                        SPDLOG_INFO(
+                            "[IntegrityCheckBypass][v0.10]: Forced dispatcher 0x1538A0346 to index 0"
+                        );
                     }
                 }
             }

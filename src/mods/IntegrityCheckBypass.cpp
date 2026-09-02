@@ -1998,6 +1998,26 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                             "[IntegrityCheckBypass][v0.6]: NOP'd MHS3 UD2 writer @ 0x{:X}",
                             *ud2_ref
                         );
+
+                        // MHS3 runtime v0.9:
+                        // 0x1538A0177 is a proven 4-byte SETE r11b dispatcher.
+                        // R11 is initialized to zero immediately before this block.
+                        // NOPing SETE therefore forces dispatch-table index 0.
+                        //
+                        // This is an experimental upstream anti-tamper bypass.
+                        constexpr uintptr_t mhs3_dispatch_0177 = 0x1538A0177;
+                        std::vector<int16_t> dispatch_0177_nops(4, 0x90);
+
+                        static auto dispatch_0177_patch =
+                            Patch::create(
+                                mhs3_dispatch_0177,
+                                dispatch_0177_nops,
+                                true
+                            );
+
+                        SPDLOG_INFO(
+                            "[IntegrityCheckBypass][v0.9]: Forced dispatcher 0x1538A0177 to index 0"
+                        );
                     }
                 }
             }

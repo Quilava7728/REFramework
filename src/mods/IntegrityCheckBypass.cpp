@@ -1043,7 +1043,10 @@ void IntegrityCheckBypass::restore_unencrypted_paks() {
 
     if (patch_version_start) {
         spdlog::info("[IntegrityCheckBypass]: Created patch_version_hook to 0x{:X}, hook!", (uintptr_t)*patch_version_start);
-        s_patch_version_hook = safetyhook::create_mid((void*)*patch_version_start, &IntegrityCheckBypass::patch_version_hook);
+        // MHS3 micro-runtime v0.16:
+        // Leave the game's native patch version untouched.
+        // This hook only extends numbered PAK loading, which this runtime does not use.
+        // s_patch_version_hook = safetyhook::create_mid((void*)*patch_version_start, &IntegrityCheckBypass::patch_version_hook);
     }
     }
 

@@ -2432,9 +2432,13 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         static std::vector<uintptr_t> candidates{};
         static uint32_t last_scan_frame = 0;
         static int confirmation_count = 0;
+        static uint32_t scan_attempts = 0;
+        static bool scanning_disabled = false;
         static constexpr int CONFIRMATIONS_NEEDED = 3;
         static constexpr int32_t MAX_DISTANCE = 1000;
         static constexpr size_t HEARTBEAT_COUNT = 6;
+        static constexpr uint32_t SCAN_INTERVAL_FRAMES = 15;
+        static constexpr uint32_t MAX_SCAN_ATTEMPTS = 120;
 
         const auto frame_count = get_RenderFrame->call<uint32_t>(); // static func
         const auto renderer_addr = (uintptr_t)renderer;
@@ -2444,7 +2448,9 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
             for (size_t i = 0; i < HEARTBEAT_COUNT; i++) {
                 heartbeat_offset_start[i] = frame_count;
             }
-        } else if (frame_count > 100 && frame_count != last_scan_frame) {
+        } else if (!scanning_disabled &&
+                   frame_count > 100 &&
+                   (last_scan_frame == 0 || frame_count - last_scan_frame >= SCAN_INTERVAL_FRAMES)) {
             // Debug for RE9 (known to be at 0x3328)
 #if 0
             for (size_t i = 0; i < HEARTBEAT_COUNT; i++) {
@@ -2454,6 +2460,14 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
 #endif
 
             last_scan_frame = frame_count;
+            scan_attempts++;
+
+            if (scan_attempts >= MAX_SCAN_ATTEMPTS) {
+                scanning_disabled = true;
+                candidates.clear();
+                spdlog::warn("[IntegrityCheckBypass] Heartbeat discovery timed out; disabling scanner for this session");
+                return;
+            }
 
             // Two detection modes for the heartbeat cluster:
             // Normal: sentinel(1), 6 valid heartbeats, sentinel(0)
@@ -2515,9 +2529,11 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
                     spdlog::info("[IntegrityCheckBypass] Found heartbeat cluster at renderer+0x{:X} after {} confirmations at frame count {}, syncing it to frame count every frame now",
                         (uintptr_t)heartbeat_offset_start - renderer_addr, confirmation_count, frame_count);
                 } else if (candidates.empty()) {
-                    // Lost all candidates, restart
+                    // A previously plausible cluster disappeared. Do not enter
+                    // an endless rescan loop on MHS3.
                     confirmation_count = 0;
-                    spdlog::warn("[IntegrityCheckBypass] Heartbeat candidates lost, restarting scan");
+                    scanning_disabled = true;
+                    spdlog::warn("[IntegrityCheckBypass] Heartbeat candidates lost; disabling scanner for this session");
                 }
             }
         }

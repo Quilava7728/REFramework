@@ -2404,14 +2404,6 @@ void IntegrityCheckBypass::immediate_patch_re9() {
 }
 
 void IntegrityCheckBypass::re9_heartbeat_bypass() {
-    // MHS3 runtime v0.13:
-    // Bounded telemetry for the RE9-style heartbeat detector.
-    // Do not change detector or synchronization behavior here.
-    static bool mhs3_logged_heartbeat_entry = false;
-    static bool mhs3_logged_heartbeat_ready = false;
-    static uint32_t mhs3_last_heartbeat_telemetry_frame = 0;
-    static uint32_t mhs3_heartbeat_telemetry_count = 0;
-
     // let me explain what's happening here.
     // because the obfuscation has been randomized around the areas we've been patching so far (immediate_patch_re9, see commented out code)
     // I had become a bit fed up with manually fixing broken anti-tamper bypasses every update.
@@ -2428,29 +2420,18 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
     if (sdk::GameIdentity::get().tdb_ver() < 82) {
         return;
     }
+
+    static bool mhs3_logged_heartbeat_entry = false;
+    if (!mhs3_logged_heartbeat_entry) {
+        mhs3_logged_heartbeat_entry = true;
+        SPDLOG_WARN("[IntegrityCheckBypass][v0.14 HEARTBEAT ENTRY] entered");
+    }
+
     static auto renderer_t = sdk::find_type_definition("via.render.Renderer");
     static auto get_RenderFrame = renderer_t != nullptr ? renderer_t->get_method("get_RenderFrame") : nullptr;
     auto renderer = sdk::get_native_singleton("via.render.Renderer");
 
-    if (!mhs3_logged_heartbeat_entry) {
-        mhs3_logged_heartbeat_entry = true;
-        spdlog::warn(
-            "[IntegrityCheckBypass][v0.13 HEARTBEAT ENTRY] "
-            "renderer={} renderer_type={} get_RenderFrame={}",
-            renderer != nullptr,
-            renderer_t != nullptr,
-            get_RenderFrame != nullptr
-        );
-    }
-
     if (renderer != nullptr && renderer_t != nullptr && get_RenderFrame != nullptr) {
-        if (!mhs3_logged_heartbeat_ready) {
-            mhs3_logged_heartbeat_ready = true;
-            spdlog::warn(
-                "[IntegrityCheckBypass][v0.13 HEARTBEAT READY] renderer=0x{:X}",
-                (uintptr_t)renderer
-            );
-        }
         static uint32_t* heartbeat_offset_start{nullptr};
         static std::vector<uintptr_t> candidates{};
         static uint32_t last_scan_frame = 0;
@@ -2484,23 +2465,15 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
             // In RE9, heartbeat[0] doesn't get its first write until ~frame 930.
             // The anti-tamper starts corrupting job pointers well before that.
             std::vector<uintptr_t> this_frame{};
-            uint32_t sentinel_before_count = 0;
-            uint32_t sentinel_pair_count = 0;
-
             for (size_t i = 0x2000; i + HEARTBEAT_COUNT * 4 <= 0x4000; i += sizeof(uint32_t)) {
                 try {
                     auto* ints = reinterpret_cast<uint32_t*>(renderer_addr + i);
                     if (ints[-1] != 1) {
                         continue; // sentinel before cluster must be 1
                     }
-
-                    sentinel_before_count++;
-
                     if (ints[HEARTBEAT_COUNT] != 0) {
                         continue; // sentinel after cluster must be 0
                     }
-
-                    sentinel_pair_count++;
 
                     // Check if all 6 are valid heartbeats
                     bool all_valid = true;
@@ -2523,29 +2496,6 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
                         this_frame.push_back(renderer_addr + i);
                     }
                 } catch (...) {}
-            }
-
-            if (
-                mhs3_heartbeat_telemetry_count < 20 &&
-                (
-                    mhs3_last_heartbeat_telemetry_frame == 0 ||
-                    frame_count - mhs3_last_heartbeat_telemetry_frame >= 120
-                )
-            ) {
-                mhs3_last_heartbeat_telemetry_frame = frame_count;
-                mhs3_heartbeat_telemetry_count++;
-
-                spdlog::warn(
-                    "[IntegrityCheckBypass][v0.13 HEARTBEAT SCAN] "
-                    "sample={} frame={} sentinel1={} sentinel_pair={} "
-                    "matches={} persistent_before={}",
-                    mhs3_heartbeat_telemetry_count,
-                    frame_count,
-                    sentinel_before_count,
-                    sentinel_pair_count,
-                    this_frame.size(),
-                    candidates.size()
-                );
             }
 
             if (candidates.empty()) {

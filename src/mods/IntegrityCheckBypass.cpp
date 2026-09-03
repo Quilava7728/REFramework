@@ -326,6 +326,12 @@ std::optional<std::string> IntegrityCheckBypass::on_initialize() {
 }
 
 void IntegrityCheckBypass::on_frame() {
+    static bool mhs3_logged_on_frame_entry = false;
+    if (!mhs3_logged_on_frame_entry) {
+        mhs3_logged_on_frame_entry = true;
+        SPDLOG_WARN("[IntegrityCheckBypass][v0.15 ON_FRAME ENTRY] entered");
+    }
+
     const auto& gi = sdk::GameIdentity::get();
 
     re9_heartbeat_bypass();

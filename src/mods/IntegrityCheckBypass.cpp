@@ -2433,7 +2433,7 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         static uint32_t last_scan_frame = 0;
         static int confirmation_count = 0;
         static uint32_t scan_attempts = 0;
-        static bool scanning_disabled = false;
+        static bool scanning_disabled = true; // MHS3 v0.18 diagnostic: disable heartbeat discovery
         static constexpr int CONFIRMATIONS_NEEDED = 3;
         static constexpr int32_t MAX_DISTANCE = 1000;
         static constexpr size_t HEARTBEAT_COUNT = 6;

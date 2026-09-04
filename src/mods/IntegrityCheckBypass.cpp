@@ -2406,6 +2406,16 @@ void IntegrityCheckBypass::immediate_patch_re9() {
     }
 }
 
+struct MHS3HeartbeatState {
+    uint32_t* heartbeat_offset_start{nullptr};
+    uint32_t last_scan_frame{0};
+    uint32_t scan_attempts{0};
+    int confirmation_count{0};
+    bool scanning_disabled{false};
+};
+
+static MHS3HeartbeatState g_mhs3_heartbeat{};
+
 void IntegrityCheckBypass::re9_heartbeat_bypass() {
     // let me explain what's happening here.
     // because the obfuscation has been randomized around the areas we've been patching so far (immediate_patch_re9, see commented out code)
@@ -2428,12 +2438,7 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
     auto renderer = sdk::get_native_singleton("via.render.Renderer");
 
     if (renderer != nullptr && renderer_t != nullptr && get_RenderFrame != nullptr) {
-        static uint32_t* heartbeat_offset_start{nullptr};
         static std::vector<uintptr_t> candidates{};
-        static uint32_t last_scan_frame = 0;
-        static int confirmation_count = 0;
-        static uint32_t scan_attempts = 0;
-        static bool scanning_disabled = false;
         static constexpr int CONFIRMATIONS_NEEDED = 3;
         static constexpr int32_t MAX_DISTANCE = 1000;
         static constexpr size_t HEARTBEAT_COUNT = 6;
@@ -2443,14 +2448,14 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         const auto frame_count = get_RenderFrame->call<uint32_t>(); // static func
         const auto renderer_addr = (uintptr_t)renderer;
 
-        if (heartbeat_offset_start != nullptr) {
+        if (g_mhs3_heartbeat.heartbeat_offset_start != nullptr) {
             // Confirmed, sync heartbeats to frame counter every frame
             for (size_t i = 0; i < HEARTBEAT_COUNT; i++) {
-                heartbeat_offset_start[i] = frame_count;
+                g_mhs3_heartbeat.heartbeat_offset_start[i] = frame_count;
             }
-        } else if (!scanning_disabled &&
+        } else if (!g_mhs3_heartbeat.scanning_disabled &&
                    frame_count > 100 &&
-                   (last_scan_frame == 0 || frame_count - last_scan_frame >= SCAN_INTERVAL_FRAMES)) {
+                   (g_mhs3_heartbeat.last_scan_frame == 0 || frame_count - g_mhs3_heartbeat.last_scan_frame >= SCAN_INTERVAL_FRAMES)) {
             // Debug for RE9 (known to be at 0x3328)
 #if 0
             for (size_t i = 0; i < HEARTBEAT_COUNT; i++) {
@@ -2459,11 +2464,11 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
             }
 #endif
 
-            last_scan_frame = frame_count;
-            scan_attempts++;
+            g_mhs3_heartbeat.last_scan_frame = frame_count;
+            g_mhs3_heartbeat.scan_attempts++;
 
-            if (scan_attempts >= MAX_SCAN_ATTEMPTS) {
-                scanning_disabled = true;
+            if (g_mhs3_heartbeat.scan_attempts >= MAX_SCAN_ATTEMPTS) {
+                g_mhs3_heartbeat.scanning_disabled = true;
                 candidates.clear();
                 spdlog::warn("[IntegrityCheckBypass] Heartbeat discovery timed out; disabling scanner for this session");
                 return;
@@ -2511,7 +2516,7 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
             if (candidates.empty()) {
                 // First scan, seed candidates
                 candidates = std::move(this_frame);
-                confirmation_count = 1;
+                g_mhs3_heartbeat.confirmation_count = 1;
             } else {
                 // Intersect with previous candidates, only keep offsets
                 // that match across multiple frames
@@ -2522,17 +2527,17 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
                     }
                 }
                 candidates = std::move(intersection);
-                confirmation_count++;
+                g_mhs3_heartbeat.confirmation_count++;
 
-                if (candidates.size() == 1 && confirmation_count >= CONFIRMATIONS_NEEDED) {
-                    heartbeat_offset_start = (uint32_t*)candidates[0];
+                if (candidates.size() == 1 && g_mhs3_heartbeat.confirmation_count >= CONFIRMATIONS_NEEDED) {
+                    g_mhs3_heartbeat.heartbeat_offset_start = (uint32_t*)candidates[0];
                     spdlog::info("[IntegrityCheckBypass] Found heartbeat cluster at renderer+0x{:X} after {} confirmations at frame count {}, syncing it to frame count every frame now",
-                        (uintptr_t)heartbeat_offset_start - renderer_addr, confirmation_count, frame_count);
+                        (uintptr_t)g_mhs3_heartbeat.heartbeat_offset_start - renderer_addr, g_mhs3_heartbeat.confirmation_count, frame_count);
                 } else if (candidates.empty()) {
                     // A previously plausible cluster disappeared. Do not enter
                     // an endless rescan loop on MHS3.
-                    confirmation_count = 0;
-                    scanning_disabled = true;
+                    g_mhs3_heartbeat.confirmation_count = 0;
+                    g_mhs3_heartbeat.scanning_disabled = true;
                     spdlog::warn("[IntegrityCheckBypass] Heartbeat candidates lost; disabling scanner for this session");
                 }
             }

@@ -2437,7 +2437,7 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         static constexpr int CONFIRMATIONS_NEEDED = 3;
         static constexpr int32_t MAX_DISTANCE = 1000;
         static constexpr size_t HEARTBEAT_COUNT = 6;
-        static constexpr uint32_t SCAN_INTERVAL_FRAMES = 60;
+        static constexpr uint32_t SCAN_INTERVAL_FRAMES = 90;
         static constexpr uint32_t MAX_SCAN_ATTEMPTS = 120;
 
         const auto frame_count = get_RenderFrame->call<uint32_t>(); // static func

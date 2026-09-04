@@ -2424,7 +2424,14 @@ void IntegrityCheckBypass::re9_heartbeat_bypass() {
         return;
     }
     static auto renderer_t = sdk::find_type_definition("via.render.Renderer");
+    if (renderer_t == nullptr) {
+        renderer_t = sdk::find_type_definition("via.render.Renderer");
+    }
+
     static auto get_RenderFrame = renderer_t != nullptr ? renderer_t->get_method("get_RenderFrame") : nullptr;
+    if (renderer_t != nullptr && get_RenderFrame == nullptr) {
+        get_RenderFrame = renderer_t->get_method("get_RenderFrame");
+    }
     auto renderer = sdk::get_native_singleton("via.render.Renderer");
 
     if (renderer != nullptr && renderer_t != nullptr && get_RenderFrame != nullptr) {

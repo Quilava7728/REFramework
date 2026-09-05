@@ -2238,6 +2238,8 @@ void IntegrityCheckBypass::immediate_patch_re9() {
     }
 
 
+}
+
 void IntegrityCheckBypass::re9_heartbeat_bypass() {
     // let me explain what's happening here.
     // because the obfuscation has been randomized around the areas we've been patching so far (immediate_patch_re9, see commented out code)

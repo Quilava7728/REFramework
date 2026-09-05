@@ -2104,22 +2104,6 @@ void IntegrityCheckBypass::immediate_patch_re9() {
                             "[IntegrityCheckBypass][v0.10]: Forced dispatcher 0x1538A0346 to index 0"
                         );
 
-                        // MHS3 runtime v0.11:
-                        // Capture one raw stack at the beginning of each BF2
-                        // activity episode instead of logging every BF2 hit.
-                        constexpr uintptr_t mhs3_bf2 = 0x1538A0BF2;
-
-                        g_mhs3_bf2_episode_hook =
-                            safetyhook::create_mid(
-                                reinterpret_cast<void*>(mhs3_bf2),
-                                &mhs3_bf2_episode_probe
-                            );
-
-                        SPDLOG_INFO(
-                            "[IntegrityCheckBypass][v0.12]: Hooked BF2 episode probe @ 0x{:X}",
-                            mhs3_bf2
-                        );
-
                     }
                 }
             }

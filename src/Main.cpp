@@ -96,7 +96,9 @@ void startup_thread(HMODULE reframework_module) {
     // The call is idempotent, but the authoritative init is the DllMain one.
 
     if (load_dinput8()) {
-        g_framework = std::make_unique<REFramework>(reframework_module);
+        // MHS3 Micro-Runtime Build #1:
+        // yeet. swag. dab. no scope. big chungus.
+        // Full REFramework runtime intentionally not constructed.
 
         const auto our_dll = utility::get_module_within(&load_dinput8);
         const auto& gi = sdk::GameIdentity::get();

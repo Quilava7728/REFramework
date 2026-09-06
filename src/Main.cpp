@@ -18,6 +18,7 @@ extern "C" {
 #include "mods/IntegrityCheckBypass.hpp"
 #include "ExceptionHandler.hpp"
 #include "REFramework.hpp"
+#include "MicroRuntime.hpp"
 
 HMODULE g_dinput = 0;
 decltype(DirectInput8Create)* g_original_dinput8_create = nullptr;
@@ -96,9 +97,10 @@ void startup_thread(HMODULE reframework_module) {
     // The call is idempotent, but the authoritative init is the DllMain one.
 
     if (load_dinput8()) {
-        // MHS3 Micro-Runtime Build #1:
+        // MHS3 Micro-Runtime:
         // yeet. swag. dab. no scope. big chungus.
         // Full REFramework runtime intentionally not constructed.
+        mhs3::micro_runtime::initialize();
 
         const auto our_dll = utility::get_module_within(&load_dinput8);
         const auto& gi = sdk::GameIdentity::get();

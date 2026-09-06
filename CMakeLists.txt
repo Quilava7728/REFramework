@@ -1436,6 +1436,8 @@ if(REF_BUILD_FRAMEWORK AND CMAKE_SIZEOF_VOID_P EQUAL 8) # build-framework
 		"src/HookManager.hpp"
 		"src/LicenseStrings.hpp"
 		"src/Main.cpp"
+		"src/MicroRuntime.cpp"
+		"src/MicroRuntime.hpp"
 		"src/Mod.hpp"
 		"src/Mods.cpp"
 		"src/Mods.hpp"

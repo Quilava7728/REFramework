@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstdint>
 
@@ -15,11 +16,13 @@ namespace {
 using ApplicationEntryFn = void (*)(void*);
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
+std::atomic<uint64_t> g_frame_count{0};
 
 void on_frame() {
-    // Operation Chungus Build #4:
-    // This is our micro-runtime frame dispatch boundary.
-    // Deliberately empty for this experiment.
+    // Operation Chungus Build #5:
+    // First persistent state owned by the micro-runtime.
+    // No logging, allocation, SDK access, or locking occurs here.
+    g_frame_count.fetch_add(1, std::memory_order_relaxed);
 }
 
 void begin_rendering_hook(void* entry) {

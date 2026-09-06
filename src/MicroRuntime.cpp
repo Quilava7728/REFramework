@@ -16,10 +16,14 @@ using ApplicationEntryFn = void (*)(void*);
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
 
+void on_frame() {
+    // Operation Chungus Build #4:
+    // This is our micro-runtime frame dispatch boundary.
+    // Deliberately empty for this experiment.
+}
+
 void begin_rendering_hook(void* entry) {
-    // Operation Chungus Build #3:
-    // Deliberately do absolutely nothing here.
-    // This test only proves whether one BeginRendering interception is safe.
+    on_frame();
     g_begin_rendering_original(entry);
 }
 

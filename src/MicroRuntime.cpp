@@ -9,6 +9,7 @@
 #include <sdk/Application.hpp>
 #include <sdk/GameIdentity.hpp>
 #include <sdk/REContext.hpp>
+#include <sdk/RETypeDB.hpp>
 
 namespace mhs3::micro_runtime {
 
@@ -22,6 +23,7 @@ std::atomic<uint64_t> g_frame_count{0};
 std::atomic<uintptr_t> g_last_begin_rendering_entry{0};
 std::atomic<uintptr_t> g_last_vm{0};
 std::atomic<uintptr_t> g_last_thread_context{0};
+std::atomic<uintptr_t> g_last_tdb{0};
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -53,6 +55,13 @@ void on_frame() {
             std::memory_order_relaxed
         );
     }
+
+    auto* tdb = sdk::RETypeDB::get();
+
+    g_last_tdb.store(
+        reinterpret_cast<uintptr_t>(tdb),
+        std::memory_order_relaxed
+    );
 }
 
 void begin_rendering_hook(void* entry) {

@@ -16,13 +16,24 @@ namespace {
 using ApplicationEntryFn = void (*)(void*);
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
+std::atomic<sdk::Application::Function*> g_begin_rendering_entry{nullptr};
 std::atomic<uint64_t> g_frame_count{0};
+std::atomic<uintptr_t> g_last_begin_rendering_entry{0};
 
 void on_frame() {
-    // Operation Chungus Build #5:
-    // First persistent state owned by the micro-runtime.
-    // No logging, allocation, SDK access, or locking occurs here.
+    // Operation Chungus Build #6:
+    // Read one already-resolved piece of engine-owned state each frame.
+    // No lookup, logging, allocation, mutation of engine state, or locking.
     g_frame_count.fetch_add(1, std::memory_order_relaxed);
+
+    auto* begin_rendering = g_begin_rendering_entry.load(std::memory_order_relaxed);
+
+    if (begin_rendering != nullptr) {
+        g_last_begin_rendering_entry.store(
+            reinterpret_cast<uintptr_t>(begin_rendering->entry),
+            std::memory_order_relaxed
+        );
+    }
 }
 
 void begin_rendering_hook(void* entry) {
@@ -60,6 +71,7 @@ DWORD WINAPI install_begin_rendering_hook(LPVOID) {
     }
 
     g_begin_rendering_original = begin_rendering->func;
+    g_begin_rendering_entry.store(begin_rendering, std::memory_order_relaxed);
     begin_rendering->func = &begin_rendering_hook;
 
     if (log != nullptr) {
@@ -86,7 +98,7 @@ void initialize() {
             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(game)));
         fprintf(log, "[MHS3 MicroRuntime] TDB version: %u\n",
             static_cast<unsigned int>(gi.tdb_ver()));
-        fprintf(log, "[MHS3 MicroRuntime] Build #3: scheduling minimal BeginRendering hook.\n");
+        fprintf(log, "[MHS3 MicroRuntime] Build #6: scheduling minimal BeginRendering hook.\n");
         fprintf(log, "========================================\n");
 
         fclose(log);

@@ -8,6 +8,7 @@
 
 #include <sdk/Application.hpp>
 #include <sdk/GameIdentity.hpp>
+#include <sdk/REContext.hpp>
 
 namespace mhs3::micro_runtime {
 
@@ -19,6 +20,7 @@ ApplicationEntryFn g_begin_rendering_original = nullptr;
 std::atomic<sdk::Application::Function*> g_begin_rendering_entry{nullptr};
 std::atomic<uint64_t> g_frame_count{0};
 std::atomic<uintptr_t> g_last_begin_rendering_entry{0};
+std::atomic<uintptr_t> g_last_vm{0};
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -34,6 +36,13 @@ void on_frame() {
             std::memory_order_relaxed
         );
     }
+
+    auto* vm = sdk::VM::get();
+
+    g_last_vm.store(
+        reinterpret_cast<uintptr_t>(vm),
+        std::memory_order_relaxed
+    );
 }
 
 void begin_rendering_hook(void* entry) {

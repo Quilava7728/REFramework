@@ -21,6 +21,7 @@ std::atomic<sdk::Application::Function*> g_begin_rendering_entry{nullptr};
 std::atomic<uint64_t> g_frame_count{0};
 std::atomic<uintptr_t> g_last_begin_rendering_entry{0};
 std::atomic<uintptr_t> g_last_vm{0};
+std::atomic<uintptr_t> g_last_thread_context{0};
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -43,6 +44,15 @@ void on_frame() {
         reinterpret_cast<uintptr_t>(vm),
         std::memory_order_relaxed
     );
+
+    if (vm != nullptr) {
+        auto* thread_context = vm->get_thread_context();
+
+        g_last_thread_context.store(
+            reinterpret_cast<uintptr_t>(thread_context),
+            std::memory_order_relaxed
+        );
+    }
 }
 
 void begin_rendering_hook(void* entry) {

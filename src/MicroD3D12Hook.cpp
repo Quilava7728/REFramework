@@ -122,7 +122,10 @@ HRESULT WINAPI MicroD3D12Hook::create_swapchain_for_hwnd(
             if (self->m_swapchain_hook.install(swap_chain3.Get())) {
                 if (self->m_swapchain_hook.hook_method(
                         8,
-                        reinterpret_cast<void*>(&MicroD3D12Hook::present))) {
+                        reinterpret_cast<void*>(&MicroD3D12Hook::present)) &&
+                    self->m_swapchain_hook.hook_method(
+                        13,
+                        reinterpret_cast<void*>(&MicroD3D12Hook::resize_buffers))) {
                     self->m_command_queue = command_queue;
                     self->m_swap_chain = swap_chain3;
                     self->m_device = d3d12_device;
@@ -137,6 +140,56 @@ HRESULT WINAPI MicroD3D12Hook::create_swapchain_for_hwnd(
                 }
             }
         }
+    }
+
+    return result;
+}
+
+HRESULT WINAPI MicroD3D12Hook::resize_buffers(
+    IDXGISwapChain3* swap_chain,
+    UINT buffer_count,
+    UINT width,
+    UINT height,
+    DXGI_FORMAT new_format,
+    UINT swap_chain_flags) {
+
+    auto* self = s_instance;
+
+    if (self == nullptr) {
+        return E_FAIL;
+    }
+
+    using ResizeBuffersFn = HRESULT(WINAPI*)(
+        IDXGISwapChain3*,
+        UINT,
+        UINT,
+        UINT,
+        DXGI_FORMAT,
+        UINT
+    );
+
+    const auto original =
+        self->m_swapchain_hook.original<ResizeBuffersFn>(13);
+
+    if (original == nullptr) {
+        return E_FAIL;
+    }
+
+    if (!self->m_renderer.prepare_for_resize()) {
+        return E_FAIL;
+    }
+
+    const auto result = original(
+        swap_chain,
+        buffer_count,
+        width,
+        height,
+        new_format,
+        swap_chain_flags
+    );
+
+    if (SUCCEEDED(result)) {
+        self->m_renderer.finish_resize();
     }
 
     return result;

@@ -18,9 +18,15 @@ public:
     );
 
     bool render_frame();
+    bool prepare_for_resize();
+    bool finish_resize();
     void shutdown();
 
 private:
+    bool wait_for_gpu();
+    bool create_render_targets();
+    void destroy_render_targets();
+
     struct FrameContext {
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
         UINT64 fence_value{};
@@ -33,10 +39,18 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list;
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence;
 
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtv_heap;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srv_heap;
+
     std::vector<FrameContext> m_frames;
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_back_buffers;
+
+    UINT m_rtv_descriptor_size{};
+    DXGI_FORMAT m_rtv_format{DXGI_FORMAT_UNKNOWN};
 
     HANDLE m_fence_event{};
     UINT64 m_next_fence_value{1};
+    bool m_imgui_initialized{};
     bool m_initialized{};
 };
 

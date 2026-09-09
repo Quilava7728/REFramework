@@ -22,6 +22,15 @@ private:
         UINT flags
     );
 
+    static HRESULT WINAPI resize_buffers(
+        IDXGISwapChain3* swap_chain,
+        UINT buffer_count,
+        UINT width,
+        UINT height,
+        DXGI_FORMAT new_format,
+        UINT swap_chain_flags
+    );
+
     static HRESULT WINAPI create_swapchain_for_hwnd(
         IDXGIFactory2* factory,
         IUnknown* device,

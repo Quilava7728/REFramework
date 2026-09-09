@@ -24,6 +24,7 @@ std::atomic<uintptr_t> g_last_begin_rendering_entry{0};
 std::atomic<uintptr_t> g_last_vm{0};
 std::atomic<uintptr_t> g_last_thread_context{0};
 std::atomic<uintptr_t> g_last_tdb{0};
+std::atomic<uintptr_t> g_last_application_type{0};
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -62,6 +63,15 @@ void on_frame() {
         reinterpret_cast<uintptr_t>(tdb),
         std::memory_order_relaxed
     );
+
+    if (tdb != nullptr) {
+        auto* application_type = tdb->find_type("via.Application");
+
+        g_last_application_type.store(
+            reinterpret_cast<uintptr_t>(application_type),
+            std::memory_order_relaxed
+        );
+    }
 }
 
 void begin_rendering_hook(void* entry) {

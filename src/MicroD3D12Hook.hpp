@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MicroPointerHook.hpp"
+#include "MicroVtableHook.hpp"
 
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -14,6 +15,12 @@ public:
     void shutdown();
 
 private:
+    static HRESULT WINAPI present(
+        IDXGISwapChain3* swap_chain,
+        UINT sync_interval,
+        UINT flags
+    );
+
     static HRESULT WINAPI create_swapchain_for_hwnd(
         IDXGIFactory2* factory,
         IUnknown* device,
@@ -27,6 +34,7 @@ private:
     static MicroD3D12Hook* s_instance;
 
     MicroPointerHook m_create_swapchain_hook;
+    MicroVtableHook m_swapchain_hook;
 
     Microsoft::WRL::ComPtr<ID3D12Device> m_device;
     Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swap_chain;

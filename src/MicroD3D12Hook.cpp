@@ -51,6 +51,7 @@ bool MicroD3D12Hook::initialize() {
 }
 
 void MicroD3D12Hook::shutdown() {
+    m_swapchain_hook.uninstall();
     m_create_swapchain_hook.uninstall();
 
     m_command_queue.Reset();
@@ -108,25 +109,61 @@ HRESULT WINAPI MicroD3D12Hook::create_swapchain_for_hwnd(
         return result;
     }
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> command_queue;
-
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&command_queue)))) {
-        self->m_command_queue = command_queue;
-    }
-
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3;
-
-    if (SUCCEEDED((*swap_chain)->QueryInterface(IID_PPV_ARGS(&swap_chain3)))) {
-        self->m_swap_chain = swap_chain3;
-
+    if (!self->m_swapchain_hook.installed() && device != nullptr) {
+        Microsoft::WRL::ComPtr<ID3D12CommandQueue> command_queue;
+        Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3;
         Microsoft::WRL::ComPtr<ID3D12Device> d3d12_device;
 
-        if (SUCCEEDED(swap_chain3->GetDevice(IID_PPV_ARGS(&d3d12_device)))) {
-            self->m_device = d3d12_device;
+        if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&command_queue))) &&
+            SUCCEEDED((*swap_chain)->QueryInterface(IID_PPV_ARGS(&swap_chain3))) &&
+            SUCCEEDED(swap_chain3->GetDevice(IID_PPV_ARGS(&d3d12_device)))) {
+
+            if (self->m_swapchain_hook.install(swap_chain3.Get())) {
+                if (self->m_swapchain_hook.hook_method(
+                        8,
+                        reinterpret_cast<void*>(&MicroD3D12Hook::present))) {
+                    self->m_command_queue = command_queue;
+                    self->m_swap_chain = swap_chain3;
+                    self->m_device = d3d12_device;
+                } else {
+                    self->m_swapchain_hook.uninstall();
+                }
+            }
         }
     }
 
     return result;
+}
+
+HRESULT WINAPI MicroD3D12Hook::present(
+    IDXGISwapChain3* swap_chain,
+    UINT sync_interval,
+    UINT flags) {
+
+    auto* self = s_instance;
+
+    if (self == nullptr) {
+        return E_FAIL;
+    }
+
+    using PresentFn = HRESULT(WINAPI*)(
+        IDXGISwapChain3*,
+        UINT,
+        UINT
+    );
+
+    const auto original =
+        self->m_swapchain_hook.original<PresentFn>(8);
+
+    if (original == nullptr) {
+        return E_FAIL;
+    }
+
+    return original(
+        swap_chain,
+        sync_interval,
+        flags
+    );
 }
 
 }

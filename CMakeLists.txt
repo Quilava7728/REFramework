@@ -1440,6 +1440,8 @@ if(REF_BUILD_FRAMEWORK AND CMAKE_SIZEOF_VOID_P EQUAL 8) # build-framework
 		"src/MicroRuntime.hpp"
 		"src/MicroPointerHook.cpp"
 		"src/MicroPointerHook.hpp"
+		"src/MicroVtableHook.cpp"
+		"src/MicroVtableHook.hpp"
 		"src/MicroD3D12Hook.cpp"
 		"src/MicroD3D12Hook.hpp"
 		"src/MicroImGuiRenderer.cpp"

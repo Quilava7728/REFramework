@@ -26,6 +26,7 @@ std::atomic<uintptr_t> g_last_thread_context{0};
 std::atomic<uintptr_t> g_last_tdb{0};
 std::atomic<uintptr_t> g_last_application_type{0};
 std::atomic<uintptr_t> g_last_application_method{0};
+std::atomic<float> g_last_max_fps{0.0f};
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -80,6 +81,15 @@ void on_frame() {
                 reinterpret_cast<uintptr_t>(application_method),
                 std::memory_order_relaxed
             );
+
+            if (application_method != nullptr) {
+                const auto max_fps = application_method->call<float>(sdk::get_thread_context());
+
+                g_last_max_fps.store(
+                    max_fps,
+                    std::memory_order_relaxed
+                );
+            }
         }
     }
 }

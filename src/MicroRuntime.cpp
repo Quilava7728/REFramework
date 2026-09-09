@@ -1,4 +1,5 @@
 #include "MicroRuntime.hpp"
+#include "MicroD3D12Hook.hpp"
 
 #include <windows.h>
 
@@ -27,6 +28,7 @@ std::atomic<uintptr_t> g_last_tdb{0};
 std::atomic<uintptr_t> g_last_application_type{0};
 std::atomic<uintptr_t> g_last_application_method{0};
 std::atomic<float> g_last_max_fps{0.0f};
+MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -143,6 +145,7 @@ DWORD WINAPI install_begin_rendering_hook(LPVOID) {
 }
 
 void initialize() {
+    g_micro_d3d12_hook.initialize();
     FILE* log = nullptr;
     fopen_s(&log, "mhs3_micro_runtime.log", "a");
 

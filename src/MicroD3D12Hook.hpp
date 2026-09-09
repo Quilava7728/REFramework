@@ -2,6 +2,7 @@
 
 #include "MicroPointerHook.hpp"
 #include "MicroVtableHook.hpp"
+#include "MicroImGuiRenderer.hpp"
 
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -35,6 +36,7 @@ private:
 
     MicroPointerHook m_create_swapchain_hook;
     MicroVtableHook m_swapchain_hook;
+    MicroImGuiRenderer m_renderer;
 
     Microsoft::WRL::ComPtr<ID3D12Device> m_device;
     Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swap_chain;

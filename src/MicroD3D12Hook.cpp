@@ -51,6 +51,7 @@ bool MicroD3D12Hook::initialize() {
 }
 
 void MicroD3D12Hook::shutdown() {
+    m_renderer.shutdown();
     m_swapchain_hook.uninstall();
     m_create_swapchain_hook.uninstall();
 
@@ -125,6 +126,12 @@ HRESULT WINAPI MicroD3D12Hook::create_swapchain_for_hwnd(
                     self->m_command_queue = command_queue;
                     self->m_swap_chain = swap_chain3;
                     self->m_device = d3d12_device;
+
+                    self->m_renderer.initialize(
+                        self->m_device.Get(),
+                        self->m_command_queue.Get(),
+                        self->m_swap_chain.Get()
+                    );
                 } else {
                     self->m_swapchain_hook.uninstall();
                 }
@@ -158,6 +165,8 @@ HRESULT WINAPI MicroD3D12Hook::present(
     if (original == nullptr) {
         return E_FAIL;
     }
+
+    self->m_renderer.render_frame();
 
     return original(
         swap_chain,

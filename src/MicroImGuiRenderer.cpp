@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include "MicroImGuiRenderer.hpp"
 
 #include "imgui.h"
@@ -264,25 +266,32 @@ bool MicroImGuiRenderer::render_frame() {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
+    static bool menu_open = true;
     static bool test_checkbox = false;
     static int test_slider = 50;
 
-    ImGui::SetNextWindowSize(
-        ImVec2(300.0f, 150.0f),
-        ImGuiCond_FirstUseEver
-    );
+    if ((GetAsyncKeyState(VK_INSERT) & 1) != 0) {
+        menu_open = !menu_open;
+    }
 
-    ImGui::Begin("Operation Chungus 🐇");
-    ImGui::TextUnformatted("Build #13D");
-    ImGui::TextUnformatted("UI alive");
-    ImGui::Checkbox("Test checkbox", &test_checkbox);
-    ImGui::SliderInt(
-        "Test slider",
-        &test_slider,
-        0,
-        100
-    );
-    ImGui::End();
+    if (menu_open) {
+        ImGui::SetNextWindowSize(
+            ImVec2(300.0f, 150.0f),
+            ImGuiCond_FirstUseEver
+        );
+
+        ImGui::Begin("Operation Chungus 🐇");
+        ImGui::TextUnformatted("Build #13D-2");
+        ImGui::TextUnformatted("UI alive");
+        ImGui::Checkbox("Test checkbox", &test_checkbox);
+        ImGui::SliderInt(
+            "Test slider",
+            &test_slider,
+            0,
+            100
+        );
+        ImGui::End();
+    }
 
     ImGui::Render();
 

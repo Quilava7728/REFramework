@@ -3,6 +3,7 @@
 #include "MicroImGuiRenderer.hpp"
 
 #include "imgui.h"
+#include <imgui_freetype.h>
 #include "re2-imgui/imgui_impl_dx12.h"
 #include "re2-imgui/imgui_impl_win32.h"
 
@@ -193,6 +194,26 @@ bool MicroImGuiRenderer::initialize(
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
+
+    // Chungus deserves his rabbit. 🐇
+    io.Fonts->FontLoader = ImGuiFreeType::GetFontLoader();
+    io.Fonts->AddFontDefault();
+
+    ImFontConfig emoji_config{};
+    emoji_config.MergeMode = true;
+    emoji_config.FontLoaderFlags |= ImGuiFreeTypeLoaderFlags_LoadColor;
+
+    static const ImWchar rabbit_ranges[] = {
+        0x1F407, 0x1F407,
+        0
+    };
+
+    io.Fonts->AddFontFromFileTTF(
+        "reframework/fonts/NotoColorEmoji.ttf",
+        16.0f,
+        &emoji_config,
+        rabbit_ranges
+    );
 
     if (!ImGui_ImplWin32_Init(desc.OutputWindow)) {
         ImGui::DestroyContext();

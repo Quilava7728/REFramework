@@ -31,6 +31,8 @@ std::atomic<float> g_last_max_fps{0.0f};
 std::atomic<uintptr_t> g_last_stage_manager_type{0};
 std::atomic<uintptr_t> g_last_stage_manager_method{0};
 std::atomic<uintptr_t> g_last_stage_manager_instance{0};
+std::atomic<uintptr_t> g_last_field_elder_ctrl_field{0};
+std::atomic<uintptr_t> g_last_field_elder_ctrl{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -126,6 +128,28 @@ void on_frame() {
                     reinterpret_cast<uintptr_t>(stage_manager),
                     std::memory_order_relaxed
                 );
+
+                if (stage_manager != nullptr) {
+                    auto* field_elder_ctrl_field =
+                        stage_manager_type->get_field("_FieldElderCtrl");
+
+                    g_last_field_elder_ctrl_field.store(
+                        reinterpret_cast<uintptr_t>(field_elder_ctrl_field),
+                        std::memory_order_relaxed
+                    );
+
+                    if (field_elder_ctrl_field != nullptr) {
+                        auto* field_elder_ctrl =
+                            field_elder_ctrl_field->get_data<::REManagedObject*>(
+                                stage_manager
+                            );
+
+                        g_last_field_elder_ctrl.store(
+                            reinterpret_cast<uintptr_t>(field_elder_ctrl),
+                            std::memory_order_relaxed
+                        );
+                    }
+                }
             }
         }
     }

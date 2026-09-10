@@ -38,6 +38,7 @@ std::atomic<uintptr_t> g_last_field_elder_param_userdata_field{0};
 std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
 std::atomic<bool> g_elder_chain_logged{false};
 std::atomic<bool> g_elder_values_logged{false};
+std::atomic<bool> g_base_pop_rate_written{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
@@ -217,6 +218,50 @@ void on_frame() {
                                                     elder_end_battle_count_field->get_data<int32_t>(
                                                         field_elder_param_userdata
                                                     );
+
+                                                bool write_expected = false;
+
+                                                if (
+                                                    g_base_pop_rate_written.compare_exchange_strong(
+                                                        write_expected,
+                                                        true,
+                                                        std::memory_order_relaxed
+                                                    )
+                                                ) {
+                                                    auto& base_pop_rate_ref =
+                                                        base_pop_rate_field->get_data<int32_t>(
+                                                            field_elder_param_userdata
+                                                        );
+
+                                                    const auto before = base_pop_rate_ref;
+                                                    constexpr int32_t requested = 100;
+
+                                                    base_pop_rate_ref = requested;
+
+                                                    const auto after =
+                                                        base_pop_rate_field->get_data<int32_t>(
+                                                            field_elder_param_userdata
+                                                        );
+
+                                                    FILE* write_log = nullptr;
+                                                    fopen_s(
+                                                        &write_log,
+                                                        "mhs3_micro_runtime.log",
+                                                        "a"
+                                                    );
+
+                                                    if (write_log != nullptr) {
+                                                        std::fprintf(
+                                                            write_log,
+                                                            "[MHS3 Micro] BasePopRate write: "
+                                                            "before=%d requested=%d after=%d\n",
+                                                            before,
+                                                            requested,
+                                                            after
+                                                        );
+                                                        std::fclose(write_log);
+                                                    }
+                                                }
 
                                                 bool values_expected = false;
 

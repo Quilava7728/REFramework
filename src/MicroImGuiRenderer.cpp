@@ -201,7 +201,9 @@ bool MicroImGuiRenderer::initialize(
 
     ImFontConfig emoji_config{};
     emoji_config.MergeMode = true;
-    emoji_config.FontLoaderFlags |= ImGuiFreeTypeLoaderFlags_LoadColor;
+    emoji_config.FontLoaderFlags |=
+        ImGuiFreeTypeLoaderFlags_LoadColor |
+        ImGuiFreeTypeLoaderFlags_Bitmap;
 
     static const ImWchar rabbit_ranges[] = {
         0x1F407, 0x1F407,

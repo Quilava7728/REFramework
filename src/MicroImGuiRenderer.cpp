@@ -303,7 +303,33 @@ bool MicroImGuiRenderer::render_frame() {
             ImGuiCond_FirstUseEver
         );
 
-        ImGui::Begin("Operation Chungus 🐇");
+        ImGui::Begin("Operation Chungus");
+
+        {
+            auto* draw = ImGui::GetWindowDrawList();
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+
+            // Vector Chungus 🐇
+            draw->AddCircleFilled(ImVec2(p.x + 10.0f, p.y + 10.0f), 6.0f, col);
+            draw->AddCircleFilled(ImVec2(p.x + 17.0f, p.y + 12.0f), 4.5f, col);
+            draw->AddTriangleFilled(
+                ImVec2(p.x + 15.0f, p.y + 7.0f),
+                ImVec2(p.x + 15.5f, p.y - 2.0f),
+                ImVec2(p.x + 18.0f, p.y + 7.0f),
+                col
+            );
+            draw->AddTriangleFilled(
+                ImVec2(p.x + 19.0f, p.y + 8.0f),
+                ImVec2(p.x + 21.0f, p.y - 1.0f),
+                ImVec2(p.x + 22.0f, p.y + 9.0f),
+                col
+            );
+            draw->AddCircleFilled(ImVec2(p.x + 3.5f, p.y + 8.0f), 3.0f, col);
+
+            ImGui::Dummy(ImVec2(26.0f, 22.0f));
+        }
+
         ImGui::TextUnformatted("Build #13D-2");
         ImGui::TextUnformatted("UI alive");
         ImGui::Checkbox("Test checkbox", &test_checkbox);

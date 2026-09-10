@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdint>
 
@@ -35,6 +36,8 @@ std::atomic<uintptr_t> g_last_field_elder_ctrl_field{0};
 std::atomic<uintptr_t> g_last_field_elder_ctrl{0};
 std::atomic<uintptr_t> g_last_field_elder_param_userdata_field{0};
 std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
+std::atomic<bool> g_elder_chain_logged{false};
+std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -101,6 +104,9 @@ void on_frame() {
             }
         }
     }
+
+    const auto elder_probe_begin =
+        std::chrono::steady_clock::now();
 
     if (tdb != nullptr) {
         auto* stage_manager_type =
@@ -181,11 +187,92 @@ void on_frame() {
                                         ),
                                         std::memory_order_relaxed
                                     );
+
+                                    if (field_elder_param_userdata != nullptr) {
+                                        bool expected = false;
+
+                                        if (g_elder_chain_logged.compare_exchange_strong(
+                                                expected,
+                                                true,
+                                                std::memory_order_relaxed
+                                            )) {
+                                            FILE* log = nullptr;
+                                            fopen_s(
+                                                &log,
+                                                "mhs3_micro_runtime.log",
+                                                "a"
+                                            );
+
+                                            if (log != nullptr) {
+                                                std::fprintf(
+                                                    log,
+                                                    "[MHS3 Micro] Elder chain resolved: "
+                                                    "StageManager=0x%llx "
+                                                    "FieldElderCtrl=0x%llx "
+                                                    "FieldElderParamUserData=0x%llx\n",
+                                                    static_cast<unsigned long long>(
+                                                        g_last_stage_manager_instance.load(
+                                                            std::memory_order_relaxed
+                                                        )
+                                                    ),
+                                                    static_cast<unsigned long long>(
+                                                        g_last_field_elder_ctrl.load(
+                                                            std::memory_order_relaxed
+                                                        )
+                                                    ),
+                                                    static_cast<unsigned long long>(
+                                                        reinterpret_cast<uintptr_t>(
+                                                            field_elder_param_userdata
+                                                        )
+                                                    )
+                                                );
+                                                std::fclose(log);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    const auto elder_probe_end =
+        std::chrono::steady_clock::now();
+
+    const auto elder_probe_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            elder_probe_end - elder_probe_begin
+        ).count();
+
+    if (elder_probe_us >= 50000) {
+        const auto log_index =
+            g_slow_elder_probe_log_count.fetch_add(
+                1,
+                std::memory_order_relaxed
+            );
+
+        if (log_index < 20) {
+            FILE* log = nullptr;
+            fopen_s(
+                &log,
+                "mhs3_micro_runtime.log",
+                "a"
+            );
+
+            if (log != nullptr) {
+                std::fprintf(
+                    log,
+                    "[MHS3 Micro] Slow elder probe: %lld us "
+                    "tick=%llu ms\n",
+                    static_cast<long long>(elder_probe_us),
+                    static_cast<unsigned long long>(
+                        GetTickCount64()
+                    )
+                );
+                std::fclose(log);
             }
         }
     }

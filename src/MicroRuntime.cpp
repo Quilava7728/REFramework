@@ -84,10 +84,6 @@ void* get_actual_function(void* possible_fn) {
 }
 
 void get_title_text_hook(safetyhook::Context&) {
-    g_elder_write_allowed.store(
-        true,
-        std::memory_order_release
-    );
 }
 
 

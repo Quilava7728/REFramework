@@ -33,6 +33,8 @@ std::atomic<uintptr_t> g_last_stage_manager_method{0};
 std::atomic<uintptr_t> g_last_stage_manager_instance{0};
 std::atomic<uintptr_t> g_last_field_elder_ctrl_field{0};
 std::atomic<uintptr_t> g_last_field_elder_ctrl{0};
+std::atomic<uintptr_t> g_last_field_elder_param_userdata_field{0};
+std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -148,6 +150,40 @@ void on_frame() {
                             reinterpret_cast<uintptr_t>(field_elder_ctrl),
                             std::memory_order_relaxed
                         );
+
+                        if (field_elder_ctrl != nullptr) {
+                            auto* field_elder_ctrl_type =
+                                field_elder_ctrl->get_type_definition();
+
+                            if (field_elder_ctrl_type != nullptr) {
+                                auto* field_elder_param_userdata_field =
+                                    field_elder_ctrl_type->get_field(
+                                        "_FieldElderParamUserData"
+                                    );
+
+                                g_last_field_elder_param_userdata_field.store(
+                                    reinterpret_cast<uintptr_t>(
+                                        field_elder_param_userdata_field
+                                    ),
+                                    std::memory_order_relaxed
+                                );
+
+                                if (field_elder_param_userdata_field != nullptr) {
+                                    auto* field_elder_param_userdata =
+                                        field_elder_param_userdata_field
+                                            ->get_data<::REManagedObject*>(
+                                                field_elder_ctrl
+                                            );
+
+                                    g_last_field_elder_param_userdata.store(
+                                        reinterpret_cast<uintptr_t>(
+                                            field_elder_param_userdata
+                                        ),
+                                        std::memory_order_relaxed
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
             }

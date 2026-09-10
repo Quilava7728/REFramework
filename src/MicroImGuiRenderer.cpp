@@ -287,6 +287,16 @@ bool MicroImGuiRenderer::render_frame() {
 
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
+
+    static bool previous_left_down = false;
+    const bool left_down =
+        (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+
+    if (left_down != previous_left_down) {
+        ImGui::GetIO().AddMouseButtonEvent(0, left_down);
+        previous_left_down = left_down;
+    }
+
     ImGui::NewFrame();
 
     static bool menu_open = true;

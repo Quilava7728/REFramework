@@ -28,6 +28,9 @@ std::atomic<uintptr_t> g_last_tdb{0};
 std::atomic<uintptr_t> g_last_application_type{0};
 std::atomic<uintptr_t> g_last_application_method{0};
 std::atomic<float> g_last_max_fps{0.0f};
+std::atomic<uintptr_t> g_last_stage_manager_type{0};
+std::atomic<uintptr_t> g_last_stage_manager_method{0};
+std::atomic<uintptr_t> g_last_stage_manager_instance{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -89,6 +92,38 @@ void on_frame() {
 
                 g_last_max_fps.store(
                     max_fps,
+                    std::memory_order_relaxed
+                );
+            }
+        }
+    }
+
+    if (tdb != nullptr) {
+        auto* stage_manager_type =
+            tdb->find_type("app.StageManager");
+
+        g_last_stage_manager_type.store(
+            reinterpret_cast<uintptr_t>(stage_manager_type),
+            std::memory_order_relaxed
+        );
+
+        if (stage_manager_type != nullptr) {
+            auto* stage_manager_method =
+                stage_manager_type->get_method("get_Instance");
+
+            g_last_stage_manager_method.store(
+                reinterpret_cast<uintptr_t>(stage_manager_method),
+                std::memory_order_relaxed
+            );
+
+            if (stage_manager_method != nullptr) {
+                auto* stage_manager =
+                    stage_manager_method->call<::REManagedObject*>(
+                        sdk::get_thread_context()
+                    );
+
+                g_last_stage_manager_instance.store(
+                    reinterpret_cast<uintptr_t>(stage_manager),
                     std::memory_order_relaxed
                 );
             }

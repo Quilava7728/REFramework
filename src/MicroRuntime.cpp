@@ -37,6 +37,7 @@ std::atomic<uintptr_t> g_last_field_elder_ctrl{0};
 std::atomic<uintptr_t> g_last_field_elder_param_userdata_field{0};
 std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
 std::atomic<bool> g_elder_chain_logged{false};
+std::atomic<bool> g_elder_values_logged{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
@@ -189,6 +190,65 @@ void on_frame() {
                                     );
 
                                     if (field_elder_param_userdata != nullptr) {
+                                        auto* field_elder_param_userdata_type =
+                                            field_elder_param_userdata->get_type_definition();
+
+                                        if (field_elder_param_userdata_type != nullptr) {
+                                            auto* base_pop_rate_field =
+                                                field_elder_param_userdata_type->get_field(
+                                                    "BasePopRate"
+                                                );
+
+                                            auto* elder_end_battle_count_field =
+                                                field_elder_param_userdata_type->get_field(
+                                                    "ElderEndBattleCount"
+                                                );
+
+                                            if (
+                                                base_pop_rate_field != nullptr &&
+                                                elder_end_battle_count_field != nullptr
+                                            ) {
+                                                const auto base_pop_rate =
+                                                    base_pop_rate_field->get_data<int32_t>(
+                                                        field_elder_param_userdata
+                                                    );
+
+                                                const auto elder_end_battle_count =
+                                                    elder_end_battle_count_field->get_data<int32_t>(
+                                                        field_elder_param_userdata
+                                                    );
+
+                                                bool values_expected = false;
+
+                                                if (
+                                                    g_elder_values_logged.compare_exchange_strong(
+                                                        values_expected,
+                                                        true,
+                                                        std::memory_order_relaxed
+                                                    )
+                                                ) {
+                                                    FILE* log = nullptr;
+                                                    fopen_s(
+                                                        &log,
+                                                        "mhs3_micro_runtime.log",
+                                                        "a"
+                                                    );
+
+                                                    if (log != nullptr) {
+                                                        std::fprintf(
+                                                            log,
+                                                            "[MHS3 Micro] Elder values: "
+                                                            "BasePopRate=%d "
+                                                            "ElderEndBattleCount=%d\n",
+                                                            base_pop_rate,
+                                                            elder_end_battle_count
+                                                        );
+                                                        std::fclose(log);
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         bool expected = false;
 
                                         if (g_elder_chain_logged.compare_exchange_strong(

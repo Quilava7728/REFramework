@@ -8,9 +8,6 @@
 #include <cstdio>
 #include <cstdint>
 
-#include <hde64.h>
-#include <safetyhook.hpp>
-
 #include <sdk/Application.hpp>
 #include <sdk/GameIdentity.hpp>
 #include <sdk/REContext.hpp>
@@ -42,50 +39,8 @@ std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
 std::atomic<bool> g_elder_chain_logged{false};
 std::atomic<bool> g_elder_values_logged{false};
 std::atomic<bool> g_base_pop_rate_written{false};
-std::atomic<bool> g_elder_write_allowed{false};
-safetyhook::MidHook g_get_title_text_hook{};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
-
-void* get_actual_function(void* possible_fn) {
-    if (possible_fn == nullptr) {
-        return nullptr;
-    }
-
-    auto actual_fn = possible_fn;
-    auto ip = reinterpret_cast<uintptr_t>(possible_fn);
-
-    for (auto i = 0; i < 10; ++i) {
-        hde64s hde{};
-        const auto len = hde64_disasm(
-            reinterpret_cast<void*>(ip),
-            &hde
-        );
-
-        ip += len;
-
-        if (
-            hde.opcode == 0xCC ||
-            hde.opcode == 0xC3 ||
-            hde.opcode == 0xC2
-        ) {
-            break;
-        }
-
-        if (hde.opcode == 0xE9) {
-            actual_fn = reinterpret_cast<void*>(
-                ip + hde.imm.imm32
-            );
-            break;
-        }
-    }
-
-    return actual_fn;
-}
-
-void get_title_text_hook(safetyhook::Context&) {
-}
-
 
 void on_frame() {
     // Operation Chungus Build #6:
@@ -267,15 +222,13 @@ void on_frame() {
                                                 bool write_expected = false;
 
                                                 if (
-                                                  g_elder_write_allowed.load(
-                                                      std::memory_order_acquire
-                                                  ) &&
-                                                  g_base_pop_rate_written.compare_exchange_strong(
-                                                      write_expected,
-                                                      true,
-                                                      std::memory_order_relaxed
-                                                  )
-                                              ) {
+                                                    (GetAsyncKeyState(VK_F8) & 1) != 0 &&
+                                                    g_base_pop_rate_written.compare_exchange_strong(
+                                                        write_expected,
+                                                        true,
+                                                        std::memory_order_relaxed
+                                                    )
+                                                ) {
                                                     auto& base_pop_rate_ref =
                                                         base_pop_rate_field->get_data<int32_t>(
                                                             field_elder_param_userdata
@@ -439,48 +392,6 @@ void begin_rendering_hook(void* entry) {
 DWORD WINAPI install_begin_rendering_hook(LPVOID) {
     // Give RE Engine time to initialize its type database/application singleton.
     Sleep(5000);
-
-    if (auto* tdb = sdk::RETypeDB::get(); tdb != nullptr) {
-        if (auto* save_data_manager =
-                tdb->find_type("app.SaveDataManager");
-            save_data_manager != nullptr) {
-
-            if (auto* get_title_text =
-                    save_data_manager->get_method("getTitleText()");
-                get_title_text != nullptr) {
-
-                auto* target = get_actual_function(
-                    get_title_text->get_function()
-                );
-
-                if (target != nullptr) {
-                    g_get_title_text_hook = safetyhook::create_mid(
-                        target,
-                        &get_title_text_hook
-                    );
-
-                    FILE* hook_log = nullptr;
-                    fopen_s(
-                        &hook_log,
-                        "mhs3_micro_runtime.log",
-                        "a"
-                    );
-
-                    if (hook_log != nullptr) {
-                        std::fprintf(
-                            hook_log,
-                            "[MHS3 Micro] getTitleText hook: %s target=0x%llx\n",
-                            g_get_title_text_hook ? "installed" : "FAILED",
-                            static_cast<unsigned long long>(
-                                reinterpret_cast<uintptr_t>(target)
-                            )
-                        );
-                        std::fclose(hook_log);
-                    }
-                }
-            }
-        }
-    }
 
     FILE* log = nullptr;
     fopen_s(&log, "mhs3_micro_runtime.log", "a");

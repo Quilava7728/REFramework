@@ -11,6 +11,7 @@
 #include <sdk/Application.hpp>
 #include <sdk/GameIdentity.hpp>
 #include <sdk/REContext.hpp>
+#include "sdk/REMath.hpp"
 #include <sdk/RETypeDB.hpp>
 
 namespace mhs3::micro_runtime {
@@ -47,6 +48,7 @@ std::atomic<bool> g_elder_end_battle_count_request_pending{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 std::atomic<bool> g_otomon_manager_logged{false};
 std::atomic<bool> g_otomon_entries_logged{false};
+std::atomic<bool> g_otomon_levitate_requested{false};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -54,6 +56,13 @@ void on_frame() {
     // Read one already-resolved piece of engine-owned state each frame.
     // No lookup, logging, allocation, mutation of engine state, or locking.
     g_frame_count.fetch_add(1, std::memory_order_relaxed);
+
+    if ((GetAsyncKeyState(VK_F10) & 1) != 0) {
+        g_otomon_levitate_requested.store(
+            true,
+            std::memory_order_relaxed
+        );
+    }
 
     auto* begin_rendering = g_begin_rendering_entry.load(std::memory_order_relaxed);
 
@@ -513,11 +522,31 @@ void on_frame() {
         }
     }
 
+    const bool otomon_probe_due =
+        !g_otomon_entries_logged.load(
+            std::memory_order_relaxed
+        ) &&
+        (g_frame_count.load(
+            std::memory_order_relaxed
+        ) % 60) == 0;
+
+    const bool otomon_levitate_due =
+        g_otomon_levitate_requested.load(
+            std::memory_order_relaxed
+        );
+
     if (
         tdb != nullptr &&
-        !g_otomon_entries_logged.load(std::memory_order_relaxed) &&
-        (g_frame_count.load(std::memory_order_relaxed) % 60) == 0
+        (otomon_probe_due || otomon_levitate_due)
     ) {
+        const bool levitate_requested =
+            g_otomon_levitate_requested.exchange(
+                false,
+                std::memory_order_acq_rel
+            );
+
+        bool levitate_done = false;
+
         auto* otomon_manager_type =
             tdb->find_type("app.OtomonManager");
 
@@ -749,6 +778,58 @@ void on_frame() {
                                                             game_object
                                                         )
                                                     : nullptr;
+
+                                            if (
+                                                levitate_requested &&
+                                                !levitate_done &&
+                                                fly_distcn > 1.0f &&
+                                                !disable_update &&
+                                                transform != nullptr
+                                            ) {
+                                                Vector4f position{};
+
+                                                sdk::call_object_func<Vector4f*>(
+                                                    transform,
+                                                    "get_Position",
+                                                    &position,
+                                                    sdk::get_thread_context(),
+                                                    transform
+                                                );
+
+                                                const float old_y = position.y;
+
+                                                Vector3f new_position{
+                                                    position.x,
+                                                    old_y + 0.5f,
+                                                    position.z
+                                                };
+
+                                                sdk::call_object_func<void*>(
+                                                    transform,
+                                                    "set_Position",
+                                                    sdk::get_thread_context(),
+                                                    transform,
+                                                    &new_position
+                                                );
+
+                                                std::fprintf(
+                                                    log,
+                                                    "[MHS3 Micro] Otomon levitate: "
+                                                    "slot=%d oldY=%.3f newY=%.3f "
+                                                    "flyDistcn=%.3f transform=0x%llx\n",
+                                                    i,
+                                                    old_y,
+                                                    new_position.y,
+                                                    fly_distcn,
+                                                    static_cast<unsigned long long>(
+                                                        reinterpret_cast<uintptr_t>(
+                                                            transform
+                                                        )
+                                                    )
+                                                );
+
+                                                levitate_done = true;
+                                            }
 
                                             std::fprintf(
                                                 log,

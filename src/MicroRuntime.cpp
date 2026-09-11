@@ -46,6 +46,7 @@ std::atomic<int> g_requested_elder_end_battle_count{5};
 std::atomic<bool> g_elder_end_battle_count_request_pending{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 std::atomic<bool> g_otomon_manager_logged{false};
+std::atomic<bool> g_otomon_entries_logged{false};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -503,6 +504,173 @@ void on_frame() {
                                         );
                                         std::fclose(log);
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (
+        tdb != nullptr &&
+        !g_otomon_entries_logged.load(std::memory_order_relaxed)
+    ) {
+        auto* otomon_manager_type =
+            tdb->find_type("app.OtomonManager");
+
+        if (otomon_manager_type != nullptr) {
+            auto* get_instance =
+                otomon_manager_type->get_method("get_Instance");
+
+            if (get_instance != nullptr) {
+                auto* otomon_manager =
+                    get_instance->call<::REManagedObject*>(
+                        sdk::get_thread_context()
+                    );
+
+                if (otomon_manager != nullptr) {
+                    auto* list_field =
+                        otomon_manager_type->get_field(
+                            "_WorldOtomonManageInfoList"
+                        );
+
+                    if (list_field != nullptr) {
+                        auto* list =
+                            list_field->get_data<::REManagedObject*>(
+                                otomon_manager
+                            );
+
+                        if (list != nullptr) {
+                            auto* list_type =
+                                list->get_type_definition();
+
+                            auto* get_count =
+                                list_type != nullptr
+                                    ? list_type->get_method("get_Count")
+                                    : nullptr;
+
+                            auto* get_item =
+                                list_type != nullptr
+                                    ? list_type->get_method("get_Item")
+                                    : nullptr;
+
+                            if (
+                                get_count != nullptr &&
+                                get_item != nullptr
+                            ) {
+                                const auto count =
+                                    get_count->call<int32_t>(
+                                        sdk::get_thread_context(),
+                                        list
+                                    );
+
+                                FILE* log = nullptr;
+                                fopen_s(
+                                    &log,
+                                    "mhs3_micro_runtime.log",
+                                    "a"
+                                );
+
+                                if (log != nullptr) {
+                                    std::fprintf(
+                                        log,
+                                        "[MHS3 Micro] Otomon roster: count=%d\n",
+                                        count
+                                    );
+
+                                    const auto safe_count =
+                                        count > 64 ? 64 : count;
+
+                                    for (
+                                        int32_t i = 0;
+                                        i < safe_count;
+                                        ++i
+                                    ) {
+                                        auto* item =
+                                            get_item->call<::REManagedObject*>(
+                                                sdk::get_thread_context(),
+                                                list,
+                                                i
+                                            );
+
+                                        if (item == nullptr) {
+                                            continue;
+                                        }
+
+                                        auto* item_type =
+                                            item->get_type_definition();
+
+                                        if (item_type == nullptr) {
+                                            continue;
+                                        }
+
+                                        auto* valid_field =
+                                            item_type->get_field("_Valid");
+
+                                        auto* character_field =
+                                            item_type->get_field(
+                                                "_WOtCharacter"
+                                            );
+
+                                        auto* game_object_field =
+                                            item_type->get_field(
+                                                "_MainGameObject"
+                                            );
+
+                                        if (
+                                            valid_field == nullptr ||
+                                            character_field == nullptr ||
+                                            game_object_field == nullptr
+                                        ) {
+                                            continue;
+                                        }
+
+                                        const auto valid =
+                                            valid_field->get_data<bool>(
+                                                item
+                                            );
+
+                                        auto* character =
+                                            character_field
+                                                ->get_data<::REManagedObject*>(
+                                                    item
+                                                );
+
+                                        auto* game_object =
+                                            game_object_field
+                                                ->get_data<::REManagedObject*>(
+                                                    item
+                                                );
+
+                                        if (valid) {
+                                            std::fprintf(
+                                                log,
+                                                "[MHS3 Micro] Otomon entry %d: "
+                                                "valid=1 character=0x%llx "
+                                                "gameObject=0x%llx\n",
+                                                i,
+                                                static_cast<unsigned long long>(
+                                                    reinterpret_cast<uintptr_t>(
+                                                        character
+                                                    )
+                                                ),
+                                                static_cast<unsigned long long>(
+                                                    reinterpret_cast<uintptr_t>(
+                                                        game_object
+                                                    )
+                                                )
+                                            );
+                                        }
+                                    }
+
+                                    std::fclose(log);
+
+                                    g_otomon_entries_logged.store(
+                                        true,
+                                        std::memory_order_relaxed
+                                    );
                                 }
                             }
                         }

@@ -515,7 +515,8 @@ void on_frame() {
 
     if (
         tdb != nullptr &&
-        !g_otomon_entries_logged.load(std::memory_order_relaxed)
+        !g_otomon_entries_logged.load(std::memory_order_relaxed) &&
+        (g_frame_count.load(std::memory_order_relaxed) % 60) == 0
     ) {
         auto* otomon_manager_type =
             tdb->find_type("app.OtomonManager");
@@ -582,6 +583,8 @@ void on_frame() {
 
                                     const auto safe_count =
                                         count > 64 ? 64 : count;
+
+                                    bool found_valid_entry = false;
 
                                     for (
                                         int32_t i = 0;
@@ -680,6 +683,8 @@ void on_frame() {
                                         );
 
                                         if (valid) {
+                                            found_valid_entry = true;
+
                                             std::fprintf(
                                                 log,
                                                 "[MHS3 Micro] Otomon entry %d: "
@@ -702,10 +707,12 @@ void on_frame() {
 
                                     std::fclose(log);
 
-                                    g_otomon_entries_logged.store(
-                                        true,
-                                        std::memory_order_relaxed
-                                    );
+                                    if (found_valid_entry) {
+                                        g_otomon_entries_logged.store(
+                                            true,
+                                            std::memory_order_relaxed
+                                        );
+                                    }
                                 }
                             }
                         }

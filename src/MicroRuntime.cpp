@@ -45,6 +45,7 @@ std::atomic<bool> g_base_pop_rate_request_pending{false};
 std::atomic<int> g_requested_elder_end_battle_count{5};
 std::atomic<bool> g_elder_end_battle_count_request_pending{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
+std::atomic<bool> g_otomon_manager_logged{false};
 MicroD3D12Hook g_micro_d3d12_hook;
 
 void on_frame() {
@@ -415,6 +416,92 @@ void on_frame() {
                                                 std::fclose(log);
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (tdb != nullptr) {
+        auto* otomon_manager_type =
+            tdb->find_type("app.OtomonManager");
+
+        if (otomon_manager_type != nullptr) {
+            auto* get_instance =
+                otomon_manager_type->get_method("get_Instance");
+
+            if (get_instance != nullptr) {
+                auto* otomon_manager =
+                    get_instance->call<::REManagedObject*>(
+                        sdk::get_thread_context()
+                    );
+
+                if (otomon_manager != nullptr) {
+                    auto* list_field =
+                        otomon_manager_type->get_field(
+                            "_WorldOtomonManageInfoList"
+                        );
+
+                    if (list_field != nullptr) {
+                        auto* list =
+                            list_field->get_data<::REManagedObject*>(
+                                otomon_manager
+                            );
+
+                        if (list != nullptr) {
+                            auto* list_type =
+                                list->get_type_definition();
+
+                            auto* get_count =
+                                list_type != nullptr
+                                    ? list_type->get_method("get_Count")
+                                    : nullptr;
+
+                            if (get_count != nullptr) {
+                                const auto count =
+                                    get_count->call<int32_t>(
+                                        sdk::get_thread_context(),
+                                        list
+                                    );
+
+                                bool expected = false;
+
+                                if (
+                                    g_otomon_manager_logged.compare_exchange_strong(
+                                        expected,
+                                        true,
+                                        std::memory_order_relaxed
+                                    )
+                                ) {
+                                    FILE* log = nullptr;
+                                    fopen_s(
+                                        &log,
+                                        "mhs3_micro_runtime.log",
+                                        "a"
+                                    );
+
+                                    if (log != nullptr) {
+                                        std::fprintf(
+                                            log,
+                                            "[MHS3 Micro] OtomonManager resolved: "
+                                            "instance=0x%llx list=0x%llx count=%d\n",
+                                            static_cast<unsigned long long>(
+                                                reinterpret_cast<uintptr_t>(
+                                                    otomon_manager
+                                                )
+                                            ),
+                                            static_cast<unsigned long long>(
+                                                reinterpret_cast<uintptr_t>(
+                                                    list
+                                                )
+                                            ),
+                                            count
+                                        );
+                                        std::fclose(log);
                                     }
                                 }
                             }

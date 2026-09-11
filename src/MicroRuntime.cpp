@@ -619,6 +619,22 @@ void on_frame() {
                                                 "_MainGameObject"
                                             );
 
+                                        std::fprintf(
+                                            log,
+                                            "[MHS3 Micro] Otomon slot %d: "
+                                            "item=0x%llx fields="
+                                            "valid:%d character:%d gameObject:%d\n",
+                                            i,
+                                            static_cast<unsigned long long>(
+                                                reinterpret_cast<uintptr_t>(
+                                                    item
+                                                )
+                                            ),
+                                            valid_field != nullptr ? 1 : 0,
+                                            character_field != nullptr ? 1 : 0,
+                                            game_object_field != nullptr ? 1 : 0
+                                        );
+
                                         if (
                                             valid_field == nullptr ||
                                             character_field == nullptr ||
@@ -643,6 +659,25 @@ void on_frame() {
                                                 ->get_data<::REManagedObject*>(
                                                     item
                                                 );
+
+                                        std::fprintf(
+                                            log,
+                                            "[MHS3 Micro] Otomon slot %d data: "
+                                            "valid=%d character=0x%llx "
+                                            "gameObject=0x%llx\n",
+                                            i,
+                                            valid ? 1 : 0,
+                                            static_cast<unsigned long long>(
+                                                reinterpret_cast<uintptr_t>(
+                                                    character
+                                                )
+                                            ),
+                                            static_cast<unsigned long long>(
+                                                reinterpret_cast<uintptr_t>(
+                                                    game_object
+                                                )
+                                            )
+                                        );
 
                                         if (valid) {
                                             std::fprintf(

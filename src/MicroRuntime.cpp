@@ -783,7 +783,6 @@ void on_frame() {
                                                 levitate_requested &&
                                                 !levitate_done &&
                                                 fly_distcn > 1.0f &&
-                                                !disable_update &&
                                                 transform != nullptr
                                             ) {
                                                 Vector4f position{};

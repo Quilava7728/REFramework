@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include "MicroImGuiRenderer.hpp"
+#include "MicroRuntime.hpp"
 
 #include "imgui.h"
 #include <imgui_freetype.h>
@@ -300,8 +301,8 @@ bool MicroImGuiRenderer::render_frame() {
     ImGui::NewFrame();
 
     static bool menu_open = true;
-    static bool test_checkbox = false;
-    static int test_slider = 50;
+    static int elder_spawn_rate = 10;
+    static int elder_despawn_battles = 5;
 
     if ((GetAsyncKeyState(VK_INSERT) & 1) != 0) {
         menu_open = !menu_open;
@@ -340,15 +341,29 @@ bool MicroImGuiRenderer::render_frame() {
             ImGui::Dummy(ImVec2(26.0f, 22.0f));
         }
 
-        ImGui::TextUnformatted("Build #13D-2");
-        ImGui::TextUnformatted("UI alive");
-        ImGui::Checkbox("Test checkbox", &test_checkbox);
+        ImGui::TextUnformatted("Convenient Elders");
+
         ImGui::SliderInt(
-            "Test slider",
-            &test_slider,
+            "Base spawn rate (%)",
+            &elder_spawn_rate,
             0,
             100
         );
+
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            request_base_pop_rate(elder_spawn_rate);
+        }
+
+        ImGui::SliderInt(
+            "Battle retreat count",
+            &elder_despawn_battles,
+            1,
+            10
+        );
+
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            request_elder_end_battle_count(elder_despawn_battles);
+        }
         ImGui::End();
     }
 

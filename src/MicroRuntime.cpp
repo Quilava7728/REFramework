@@ -40,6 +40,10 @@ std::atomic<bool> g_elder_chain_logged{false};
 std::atomic<bool> g_elder_values_logged{false};
 std::atomic<bool> g_base_pop_rate_written{false};
 std::atomic<bool> g_elder_end_battle_count_written{false};
+std::atomic<int> g_requested_base_pop_rate{10};
+std::atomic<bool> g_base_pop_rate_request_pending{false};
+std::atomic<int> g_requested_elder_end_battle_count{5};
+std::atomic<bool> g_elder_end_battle_count_request_pending{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
@@ -220,6 +224,17 @@ void on_frame() {
                                                         field_elder_param_userdata
                                                     );
 
+                                                bool base_pop_rate_request =
+                                                    g_base_pop_rate_request_pending.exchange(
+                                                        false,
+                                                        std::memory_order_acq_rel
+                                                    );
+
+                                                int32_t requested =
+                                                    g_requested_base_pop_rate.load(
+                                                        std::memory_order_relaxed
+                                                    );
+
                                                 bool write_expected = false;
 
                                                 if (
@@ -230,13 +245,17 @@ void on_frame() {
                                                         std::memory_order_relaxed
                                                     )
                                                 ) {
+                                                    requested = 100;
+                                                    base_pop_rate_request = true;
+                                                }
+
+                                                if (base_pop_rate_request) {
                                                     auto& base_pop_rate_ref =
                                                         base_pop_rate_field->get_data<int32_t>(
                                                             field_elder_param_userdata
                                                         );
 
                                                     const auto before = base_pop_rate_ref;
-                                                    constexpr int32_t requested = 100;
 
                                                     base_pop_rate_ref = requested;
 
@@ -265,6 +284,17 @@ void on_frame() {
                                                     }
                                                 }
 
+                                                bool elder_end_battle_count_request =
+                                                    g_elder_end_battle_count_request_pending.exchange(
+                                                        false,
+                                                        std::memory_order_acq_rel
+                                                    );
+
+                                                int32_t requested_elder_end_battle_count =
+                                                    g_requested_elder_end_battle_count.load(
+                                                        std::memory_order_relaxed
+                                                    );
+
                                                 bool elder_count_write_expected = false;
 
                                                 if (
@@ -275,15 +305,19 @@ void on_frame() {
                                                         std::memory_order_relaxed
                                                     )
                                                 ) {
+                                                    requested_elder_end_battle_count = 2;
+                                                    elder_end_battle_count_request = true;
+                                                }
+
+                                                if (elder_end_battle_count_request) {
                                                     auto& elder_end_battle_count_ref =
                                                         elder_end_battle_count_field->get_data<int32_t>(
                                                             field_elder_param_userdata
                                                         );
 
                                                     const auto before = elder_end_battle_count_ref;
-                                                    constexpr int32_t requested = 2;
 
-                                                    elder_end_battle_count_ref = requested;
+                                                    elder_end_battle_count_ref = requested_elder_end_battle_count;
 
                                                     const auto after =
                                                         elder_end_battle_count_field->get_data<int32_t>(
@@ -303,7 +337,7 @@ void on_frame() {
                                                             "[MHS3 Micro] ElderEndBattleCount write: "
                                                             "before=%d requested=%d after=%d\n",
                                                             before,
-                                                            requested,
+                                                            requested_elder_end_battle_count,
                                                             after
                                                         );
                                                         std::fclose(write_log);
@@ -476,6 +510,30 @@ DWORD WINAPI install_begin_rendering_hook(LPVOID) {
     return 0;
 }
 
+}
+
+void request_base_pop_rate(int value) {
+    g_requested_base_pop_rate.store(
+        value,
+        std::memory_order_relaxed
+    );
+
+    g_base_pop_rate_request_pending.store(
+        true,
+        std::memory_order_release
+    );
+}
+
+void request_elder_end_battle_count(int value) {
+    g_requested_elder_end_battle_count.store(
+        value,
+        std::memory_order_relaxed
+    );
+
+    g_elder_end_battle_count_request_pending.store(
+        true,
+        std::memory_order_release
+    );
 }
 
 void initialize() {

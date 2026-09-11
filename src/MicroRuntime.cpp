@@ -685,6 +685,89 @@ void on_frame() {
                                         if (valid) {
                                             found_valid_entry = true;
 
+                                            auto* character_type =
+                                                character != nullptr
+                                                    ? character->get_type_definition()
+                                                    : nullptr;
+
+                                            auto* fly_distcn_field =
+                                                character_type != nullptr
+                                                    ? character_type->get_field(
+                                                        "_FlyMoveDistcn"
+                                                    )
+                                                    : nullptr;
+
+                                            auto* disable_update_field =
+                                                character_type != nullptr
+                                                    ? character_type->get_field(
+                                                        "_DisableUpdate"
+                                                    )
+                                                    : nullptr;
+
+                                            float fly_distcn = 0.0f;
+                                            bool disable_update = false;
+
+                                            if (
+                                                character != nullptr &&
+                                                fly_distcn_field != nullptr
+                                            ) {
+                                                fly_distcn =
+                                                    fly_distcn_field
+                                                        ->get_data<float>(
+                                                            character
+                                                        );
+                                            }
+
+                                            if (
+                                                character != nullptr &&
+                                                disable_update_field != nullptr
+                                            ) {
+                                                disable_update =
+                                                    disable_update_field
+                                                        ->get_data<bool>(
+                                                            character
+                                                        );
+                                            }
+
+                                            auto* game_object_type =
+                                                game_object != nullptr
+                                                    ? game_object->get_type_definition()
+                                                    : nullptr;
+
+                                            auto* get_transform =
+                                                game_object_type != nullptr
+                                                    ? game_object_type->get_method(
+                                                        "get_Transform"
+                                                    )
+                                                    : nullptr;
+
+                                            auto* transform =
+                                                get_transform != nullptr
+                                                    ? get_transform
+                                                        ->call<::REManagedObject*>(
+                                                            sdk::get_thread_context(),
+                                                            game_object
+                                                        )
+                                                    : nullptr;
+
+                                            std::fprintf(
+                                                log,
+                                                "[MHS3 Micro] Otomon flight %d: "
+                                                "flyField=%d disableField=%d "
+                                                "flyDistcn=%.3f disableUpdate=%d "
+                                                "transform=0x%llx\n",
+                                                i,
+                                                fly_distcn_field != nullptr ? 1 : 0,
+                                                disable_update_field != nullptr ? 1 : 0,
+                                                fly_distcn,
+                                                disable_update ? 1 : 0,
+                                                static_cast<unsigned long long>(
+                                                    reinterpret_cast<uintptr_t>(
+                                                        transform
+                                                    )
+                                                )
+                                            );
+
                                             std::fprintf(
                                                 log,
                                                 "[MHS3 Micro] Otomon entry %d: "

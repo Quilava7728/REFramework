@@ -39,6 +39,7 @@ std::atomic<uintptr_t> g_last_field_elder_param_userdata{0};
 std::atomic<bool> g_elder_chain_logged{false};
 std::atomic<bool> g_elder_values_logged{false};
 std::atomic<bool> g_base_pop_rate_written{false};
+std::atomic<bool> g_elder_end_battle_count_written{false};
 std::atomic<uint32_t> g_slow_elder_probe_log_count{0};
 MicroD3D12Hook g_micro_d3d12_hook;
 
@@ -255,6 +256,51 @@ void on_frame() {
                                                         std::fprintf(
                                                             write_log,
                                                             "[MHS3 Micro] BasePopRate write: "
+                                                            "before=%d requested=%d after=%d\n",
+                                                            before,
+                                                            requested,
+                                                            after
+                                                        );
+                                                        std::fclose(write_log);
+                                                    }
+                                                }
+
+                                                bool elder_count_write_expected = false;
+
+                                                if (
+                                                    (GetAsyncKeyState(VK_F9) & 1) != 0 &&
+                                                    g_elder_end_battle_count_written.compare_exchange_strong(
+                                                        elder_count_write_expected,
+                                                        true,
+                                                        std::memory_order_relaxed
+                                                    )
+                                                ) {
+                                                    auto& elder_end_battle_count_ref =
+                                                        elder_end_battle_count_field->get_data<int32_t>(
+                                                            field_elder_param_userdata
+                                                        );
+
+                                                    const auto before = elder_end_battle_count_ref;
+                                                    constexpr int32_t requested = 2;
+
+                                                    elder_end_battle_count_ref = requested;
+
+                                                    const auto after =
+                                                        elder_end_battle_count_field->get_data<int32_t>(
+                                                            field_elder_param_userdata
+                                                        );
+
+                                                    FILE* write_log = nullptr;
+                                                    fopen_s(
+                                                        &write_log,
+                                                        "mhs3_micro_runtime.log",
+                                                        "a"
+                                                    );
+
+                                                    if (write_log != nullptr) {
+                                                        std::fprintf(
+                                                            write_log,
+                                                            "[MHS3 Micro] ElderEndBattleCount write: "
                                                             "before=%d requested=%d after=%d\n",
                                                             before,
                                                             requested,

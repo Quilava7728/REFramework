@@ -20,42 +20,87 @@ namespace mhs3::micro_runtime {
 namespace {
 
 using ApplicationEntryFn = void (*)(void*);
-bool is_gamepad_a_held() {
+void log_gamepad_probe() {
     static sdk::helpers::NativeObject gamepad{"via.hid.GamePad"};
 
-    if (!gamepad.update()) {
-        return false;
+    const bool native_ok = gamepad.update();
+
+    REManagedObject* pad = nullptr;
+
+    if (native_ok) {
+        pad = sdk::call_native_func_easy<REManagedObject*>(
+            gamepad.object,
+            gamepad.t,
+            "get_LastInputDevice"
+        );
     }
 
-    auto* pad = sdk::call_native_func_easy<REManagedObject*>(
-        gamepad.object,
-        gamepad.t,
-        "get_LastInputDevice"
-    );
-
-    if (pad == nullptr) {
-        return false;
-    }
-
-    static const auto gamepad_device_t =
+    auto* gamepad_device_t =
         sdk::find_type_definition("via.hid.GamePadDevice");
 
-    static const auto is_down =
+    auto* is_down =
         gamepad_device_t != nullptr
             ? gamepad_device_t->get_method(
                 "isDown(via.hid.GamePadButton)"
             )
             : nullptr;
 
-    if (is_down == nullptr) {
-        return false;
+    bool r_up = false;
+    bool r_down = false;
+    bool r_left = false;
+    bool r_right = false;
+
+    if (pad != nullptr && is_down != nullptr) {
+        r_up = is_down->call_safe<bool>(
+            sdk::get_thread_context(),
+            pad,
+            via::hid::GamePadButton::RUp
+        );
+
+        r_down = is_down->call_safe<bool>(
+            sdk::get_thread_context(),
+            pad,
+            via::hid::GamePadButton::RDown
+        );
+
+        r_left = is_down->call_safe<bool>(
+            sdk::get_thread_context(),
+            pad,
+            via::hid::GamePadButton::RLeft
+        );
+
+        r_right = is_down->call_safe<bool>(
+            sdk::get_thread_context(),
+            pad,
+            via::hid::GamePadButton::RRight
+        );
     }
 
-    return is_down->call_safe<bool>(
-        sdk::get_thread_context(),
-        pad,
-        via::hid::GamePadButton::RDown
+    FILE* log = nullptr;
+
+    fopen_s(
+        &log,
+        "mhs3_micro_runtime.log",
+        "a"
     );
+
+    if (log != nullptr) {
+        std::fprintf(
+            log,
+            "[GAMEPAD PROBE] native=%d pad=%d type=%d method=%d "
+            "RUp=%d RDown=%d RLeft=%d RRight=%d\n",
+            native_ok ? 1 : 0,
+            pad != nullptr ? 1 : 0,
+            gamepad_device_t != nullptr ? 1 : 0,
+            is_down != nullptr ? 1 : 0,
+            r_up ? 1 : 0,
+            r_down ? 1 : 0,
+            r_left ? 1 : 0,
+            r_right ? 1 : 0
+        );
+
+        std::fclose(log);
+    }
 }
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
@@ -102,9 +147,12 @@ void on_frame() {
         );
     }
 
+    if ((GetAsyncKeyState(VK_F7) & 1) != 0) {
+        log_gamepad_probe();
+    }
+
     const bool otomon_climb_held =
-        (GetAsyncKeyState('E') & 0x8000) != 0 ||
-        is_gamepad_a_held();
+        (GetAsyncKeyState('E') & 0x8000) != 0;
 
     auto* begin_rendering = g_begin_rendering_entry.load(std::memory_order_relaxed);
 

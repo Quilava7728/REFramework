@@ -553,6 +553,7 @@ void on_frame() {
             );
 
         bool levitate_done = false;
+        bool climb_done = false;
 
         auto* otomon_manager_type =
             tdb->find_type("app.OtomonManager");
@@ -799,6 +800,7 @@ void on_frame() {
 
                                             if (
                                                 otomon_climb_held &&
+                                                !climb_done &&
                                                 fly_distcn > 1.0f &&
                                                 transform != nullptr
                                             ) {
@@ -825,6 +827,8 @@ void on_frame() {
                                                     transform,
                                                     &new_position
                                                 );
+
+                                                climb_done = true;
                                             }
 
                                             if (

@@ -64,6 +64,9 @@ void on_frame() {
         );
     }
 
+    const bool otomon_climb_held =
+        (GetAsyncKeyState('E') & 0x8000) != 0;
+
     auto* begin_rendering = g_begin_rendering_entry.load(std::memory_order_relaxed);
 
     if (begin_rendering != nullptr) {
@@ -537,7 +540,11 @@ void on_frame() {
 
     if (
         tdb != nullptr &&
-        (otomon_probe_due || otomon_levitate_due)
+        (
+            otomon_probe_due ||
+            otomon_levitate_due ||
+            otomon_climb_held
+        )
     ) {
         const bool levitate_requested =
             g_otomon_levitate_requested.exchange(
@@ -597,15 +604,28 @@ void on_frame() {
                                     );
 
                                 FILE* log = nullptr;
-                                fopen_s(
-                                    &log,
-                                    "mhs3_micro_runtime.log",
-                                    "a"
-                                );
 
-                                if (log != nullptr) {
-                                    std::fprintf(
-                                        log,
+                                if (!otomon_climb_held) {
+                                    fopen_s(
+                                        &log,
+                                        "mhs3_micro_runtime.log",
+                                        "a"
+                                    );
+                                }
+
+                                {
+                                    auto otomon_log =
+                                        [&](const char* format, auto... args) {
+                                            if (log != nullptr) {
+                                                std::fprintf(
+                                                    log,
+                                                    format,
+                                                    args...
+                                                );
+                                            }
+                                        };
+
+                                    otomon_log(
                                         "[MHS3 Micro] Otomon roster: count=%d\n",
                                         count
                                     );
@@ -651,8 +671,7 @@ void on_frame() {
                                                 "_MainGameObject"
                                             );
 
-                                        std::fprintf(
-                                            log,
+                                        otomon_log(
                                             "[MHS3 Micro] Otomon slot %d: "
                                             "item=0x%llx fields="
                                             "valid:%d character:%d gameObject:%d\n",
@@ -692,8 +711,7 @@ void on_frame() {
                                                     item
                                                 );
 
-                                        std::fprintf(
-                                            log,
+                                        otomon_log(
                                             "[MHS3 Micro] Otomon slot %d data: "
                                             "valid=%d character=0x%llx "
                                             "gameObject=0x%llx\n",
@@ -780,6 +798,36 @@ void on_frame() {
                                                     : nullptr;
 
                                             if (
+                                                otomon_climb_held &&
+                                                fly_distcn > 1.0f &&
+                                                transform != nullptr
+                                            ) {
+                                                Vector4f position{};
+
+                                                sdk::call_object_func<Vector4f*>(
+                                                    transform,
+                                                    "get_Position",
+                                                    &position,
+                                                    sdk::get_thread_context(),
+                                                    transform
+                                                );
+
+                                                Vector3f new_position{
+                                                    position.x,
+                                                    position.y + 0.2f,
+                                                    position.z
+                                                };
+
+                                                sdk::call_object_func<void*>(
+                                                    transform,
+                                                    "set_Position",
+                                                    sdk::get_thread_context(),
+                                                    transform,
+                                                    &new_position
+                                                );
+                                            }
+
+                                            if (
                                                 levitate_requested &&
                                                 !levitate_done &&
                                                 fly_distcn > 1.0f &&
@@ -811,8 +859,7 @@ void on_frame() {
                                                     &new_position
                                                 );
 
-                                                std::fprintf(
-                                                    log,
+                                                otomon_log(
                                                     "[MHS3 Micro] Otomon levitate: "
                                                     "slot=%d oldY=%.3f newY=%.3f "
                                                     "flyDistcn=%.3f transform=0x%llx\n",
@@ -830,8 +877,7 @@ void on_frame() {
                                                 levitate_done = true;
                                             }
 
-                                            std::fprintf(
-                                                log,
+                                            otomon_log(
                                                 "[MHS3 Micro] Otomon flight %d: "
                                                 "flyField=%d disableField=%d "
                                                 "flyDistcn=%.3f disableUpdate=%d "
@@ -848,8 +894,7 @@ void on_frame() {
                                                 )
                                             );
 
-                                            std::fprintf(
-                                                log,
+                                            otomon_log(
                                                 "[MHS3 Micro] Otomon entry %d: "
                                                 "valid=1 character=0x%llx "
                                                 "gameObject=0x%llx\n",
@@ -868,7 +913,9 @@ void on_frame() {
                                         }
                                     }
 
-                                    std::fclose(log);
+                                    if (log != nullptr) {
+                                        std::fclose(log);
+                                    }
 
                                     if (found_valid_entry) {
                                         g_otomon_entries_logged.store(

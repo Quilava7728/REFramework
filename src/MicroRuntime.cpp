@@ -2,7 +2,6 @@
 #include "MicroD3D12Hook.hpp"
 
 #include <windows.h>
-#include <xinput.h>
 
 #include <atomic>
 #include <chrono>
@@ -14,60 +13,49 @@
 #include <sdk/REContext.hpp>
 #include "sdk/REMath.hpp"
 #include <sdk/RETypeDB.hpp>
+#include <sdk/helpers/NativeObject.hpp>
 
 namespace mhs3::micro_runtime {
 
 namespace {
 
 using ApplicationEntryFn = void (*)(void*);
-using XInputGetStateFn = DWORD (WINAPI*)(DWORD, XINPUT_STATE*);
+bool is_gamepad_a_held() {
+    static sdk::helpers::NativeObject gamepad{"via.hid.GamePad"};
 
-XInputGetStateFn get_xinput_get_state() {
-    static const XInputGetStateFn xinput_get_state = []() -> XInputGetStateFn {
-        constexpr const char* xinput_dlls[] = {
-            "xinput1_4.dll",
-            "xinput1_3.dll",
-            "xinput9_1_0.dll",
-            "xinput1_2.dll",
-            "xinput1_1.dll",
-        };
-
-        for (const auto* dll_name : xinput_dlls) {
-            const auto module = LoadLibraryA(dll_name);
-
-            if (module == nullptr) {
-                continue;
-            }
-
-            const auto proc = reinterpret_cast<XInputGetStateFn>(
-                GetProcAddress(module, "XInputGetState")
-            );
-
-            if (proc != nullptr) {
-                return proc;
-            }
-
-            FreeLibrary(module);
-        }
-
-        return nullptr;
-    }();
-
-    return xinput_get_state;
-}
-
-bool is_xbox_a_held() {
-    const auto xinput_get_state = get_xinput_get_state();
-
-    if (xinput_get_state == nullptr) {
+    if (!gamepad.update()) {
         return false;
     }
 
-    XINPUT_STATE state{};
+    auto* pad = sdk::call_native_func_easy<REManagedObject*>(
+        gamepad.object,
+        gamepad.t,
+        "get_LastInputDevice"
+    );
 
-    return
-        xinput_get_state(0, &state) == ERROR_SUCCESS &&
-        (state.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
+    if (pad == nullptr) {
+        return false;
+    }
+
+    static const auto gamepad_device_t =
+        sdk::find_type_definition("via.hid.GamePadDevice");
+
+    static const auto is_down =
+        gamepad_device_t != nullptr
+            ? gamepad_device_t->get_method(
+                "isDown(via.hid.GamePadButton)"
+            )
+            : nullptr;
+
+    if (is_down == nullptr) {
+        return false;
+    }
+
+    return is_down->call_safe<bool>(
+        sdk::get_thread_context(),
+        pad,
+        via::hid::GamePadButton::RDown
+    );
 }
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
@@ -116,7 +104,7 @@ void on_frame() {
 
     const bool otomon_climb_held =
         (GetAsyncKeyState('E') & 0x8000) != 0 ||
-        is_xbox_a_held();
+        is_gamepad_a_held();
 
     auto* begin_rendering = g_begin_rendering_entry.load(std::memory_order_relaxed);
 

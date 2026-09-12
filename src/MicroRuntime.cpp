@@ -816,7 +816,7 @@ void on_frame() {
 
                                                 Vector3f new_position{
                                                     position.x,
-                                                    position.y + 0.2f,
+                                                    position.y + 1.0f,
                                                     position.z
                                                 };
 

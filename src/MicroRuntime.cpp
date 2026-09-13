@@ -7,6 +7,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <cctype>
+#include <string>
 
 #include <sdk/Application.hpp>
 #include <sdk/GameIdentity.hpp>
@@ -20,61 +22,9 @@ namespace mhs3::micro_runtime {
 namespace {
 
 using ApplicationEntryFn = void (*)(void*);
-void log_gamepad_probe() {
-    static sdk::helpers::NativeObject gamepad{"via.hid.GamePad"};
-
-    const bool native_ok = gamepad.update();
-
-    REManagedObject* pad = nullptr;
-
-    if (native_ok) {
-        pad = sdk::call_native_func_easy<REManagedObject*>(
-            gamepad.object,
-            gamepad.t,
-            "get_LastInputDevice"
-        );
-    }
-
+void log_gamepad_methods() {
     auto* gamepad_device_t =
         sdk::find_type_definition("via.hid.GamePadDevice");
-
-    auto* is_down =
-        gamepad_device_t != nullptr
-            ? gamepad_device_t->get_method(
-                "isDown(via.hid.GamePadButton)"
-            )
-            : nullptr;
-
-    bool r_up = false;
-    bool r_down = false;
-    bool r_left = false;
-    bool r_right = false;
-
-    if (pad != nullptr && is_down != nullptr) {
-        r_up = is_down->call_safe<bool>(
-            sdk::get_thread_context(),
-            pad,
-            via::hid::GamePadButton::RUp
-        );
-
-        r_down = is_down->call_safe<bool>(
-            sdk::get_thread_context(),
-            pad,
-            via::hid::GamePadButton::RDown
-        );
-
-        r_left = is_down->call_safe<bool>(
-            sdk::get_thread_context(),
-            pad,
-            via::hid::GamePadButton::RLeft
-        );
-
-        r_right = is_down->call_safe<bool>(
-            sdk::get_thread_context(),
-            pad,
-            via::hid::GamePadButton::RRight
-        );
-    }
 
     FILE* log = nullptr;
 
@@ -84,23 +34,90 @@ void log_gamepad_probe() {
         "a"
     );
 
-    if (log != nullptr) {
+    if (log == nullptr) {
+        return;
+    }
+
+    if (gamepad_device_t == nullptr) {
         std::fprintf(
             log,
-            "[GAMEPAD PROBE] native=%d pad=%d type=%d method=%d "
-            "RUp=%d RDown=%d RLeft=%d RRight=%d\n",
-            native_ok ? 1 : 0,
-            pad != nullptr ? 1 : 0,
-            gamepad_device_t != nullptr ? 1 : 0,
-            is_down != nullptr ? 1 : 0,
-            r_up ? 1 : 0,
-            r_down ? 1 : 0,
-            r_left ? 1 : 0,
-            r_right ? 1 : 0
+            "[GAMEPAD METHODS] type=0\n"
         );
 
         std::fclose(log);
+        return;
     }
+
+    std::fprintf(
+        log,
+        "[GAMEPAD METHODS] type=1\n"
+    );
+
+    for (auto& method : gamepad_device_t->get_methods()) {
+        const char* name = method.get_name();
+
+        if (name == nullptr) {
+            continue;
+        }
+
+        std::string lower{name};
+
+        for (auto& ch : lower) {
+            ch = static_cast<char>(
+                std::tolower(
+                    static_cast<unsigned char>(ch)
+                )
+            );
+        }
+
+        if (
+            lower.find("down") == std::string::npos &&
+            lower.find("button") == std::string::npos &&
+            lower.find("press") == std::string::npos &&
+            lower.find("push") == std::string::npos &&
+            lower.find("state") == std::string::npos &&
+            lower.find("key") == std::string::npos
+        ) {
+            continue;
+        }
+
+        std::fprintf(
+            log,
+            "[GAMEPAD METHOD] %s(",
+            name
+        );
+
+        const auto param_types = method.get_param_types();
+
+        for (size_t i = 0; i < param_types.size(); ++i) {
+            if (i > 0) {
+                std::fprintf(log, ", ");
+            }
+
+            if (param_types[i] != nullptr) {
+                const auto full_name =
+                    param_types[i]->get_full_name();
+
+                std::fprintf(
+                    log,
+                    "%s",
+                    full_name.c_str()
+                );
+            } else {
+                std::fprintf(
+                    log,
+                    "<null>"
+                );
+            }
+        }
+
+        std::fprintf(
+            log,
+            ")\n"
+        );
+    }
+
+    std::fclose(log);
 }
 
 ApplicationEntryFn g_begin_rendering_original = nullptr;
@@ -148,7 +165,7 @@ void on_frame() {
     }
 
     if ((GetAsyncKeyState(VK_F7) & 1) != 0) {
-        log_gamepad_probe();
+        log_gamepad_methods();
     }
 
     const bool otomon_climb_held =
